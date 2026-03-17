@@ -1,78 +1,111 @@
-CapStash Core integration/staging tree
-=====================================
 
-https://CapStashcore.org
 
-For an immediately usable, binary version of the CapStash Core software, see
-https://CapStashcore.org/en/download/.
+# ☢️ CapStash Core ☢️
 
-What is CapStash Core?
----------------------
+Before there were banks, there were bullets.  
+Before there were markets, there was barter.
+And after the bombs fell, there were Caps.
 
-CapStash Core connects to the CapStash peer-to-peer network to download and fully
-validate blocks and transactions. It also includes a wallet and graphical user
-interface, which can be optionally built.
+In the old world, money was numbers on screens, promises in databases, and paper backed by faith in systems too large to fail.
 
-Further information about CapStash Core is available in the [doc folder](/doc).
+Then the world failed.
 
-License
--------
+When civilization collapsed, people did what they have always done: they adapted. They traded what held value. Food. Water. Ammunition. Medicine. Tools. Fuel. Information. And, over time, one strange relic of the dead world rose above the rest:
 
-CapStash Core is released under the terms of the MIT license. See [COPYING](COPYING) for more
-information or see https://opensource.org/licenses/MIT.
+the bottle cap.
 
-Development Process
--------------------
+It was durable. Recognizable. Difficult enough to fake. Small enough to carry. Useless enough in any other context to gain meaning in this one. In the wasteland, value did not come from governments. It came from trust, scarcity, and survival.
 
-The `master` branch is regularly built (see `doc/build-*.md` for instructions) and tested, but it is not guaranteed to be
-completely stable. [Tags](https://github.com/CapStash/CapStash/tags) are created
-regularly from release branches to indicate new official, stable release versions of CapStash Core.
+CapStash is that idea reborn for the digital wasteland.
 
-The https://github.com/CapStash-core/gui repository is used exclusively for the
-development of the GUI. Its master branch is identical in all monotree
-repositories. Release branches and tags do not exist, so please do not fork
-that repository unless it is for development reasons.
+CapStash imagines what the currency of the Fallout universe would become if bottle caps evolved beyond pockets, pouches, and rusted vending trays—if they became programmable, mineable, transferable, and verifiable across a decentralized network built to survive the collapse of the old financial world.
 
-The contribution workflow is described in [CONTRIBUTING.md](CONTRIBUTING.md)
-and useful hints for developers can be found in [doc/developer-notes.md](doc/developer-notes.md).
+This is not just another cryptocurrency with a recycled codebase and a new logo.
 
-Testing
--------
+CapStash is a digital bottle cap economy:
+- mined instead of minted
+- verified instead of trusted
+- carried by nodes 
+- secured by proof-of-work
 
-Testing and code review is the bottleneck for development; we get more pull
-requests than we can review and test on short notice. Please be patient and help out by testing
-other people's pull requests, and remember this is a security-critical project where any mistake might cost people
-lots of money.
+If Bitcoin is pristine digital gold, CapStash is something far more rugged:
 
-### Automated Testing
+Money for survivors.
 
-Developers are strongly encouraged to write [unit tests](src/test/README.md) for new code, and to
-submit new unit tests for old code. Unit tests can be compiled and run
-(assuming they weren't disabled in configure) with: `make check`. Further details on running
-and extending unit tests can be found in [/src/test/README.md](/src/test/README.md).
+Not polished. Not delicate. Not sterile.  
+A currency for scavengers, traders, mechanics, prospectors, bunker lords, signal hunters, and anyone stubborn enough to keep building after the world is supposed to be over.
 
-There are also [regression and integration tests](/test), written
-in Python.
-These tests can be run (if the [test dependencies](/test) are installed) with: `test/functional/test_runner.py`
+CapStash Core is the terminal through which that world comes alive.
 
-The CI (Continuous Integration) systems make sure that every pull request is built for Windows, Linux, and macOS,
-and that unit/sanity tests are run automatically.
+A full node.  
+A wallet.  
+A miner.  
+A blockchain explorer.  
+A retro-futurist machine glowing with phosphor light in the dark.
 
-### Manual Quality Assurance (QA) Testing
+This is what bottle caps become when the wasteland goes online.
 
-Changes should be tested by somebody other than the developer who wrote the
-code. This is especially important for large or high-risk changes. It is useful
-to add a test plan to the pull request description if testing the changes is
-not straightforward.
+---
 
-Translations
-------------
+## What is a Cap?
 
-Changes to translations as well as new translations can be submitted to
-[CapStash Core's Transifex page](https://www.transifex.com/CapStash/CapStash/).
+A Cap is the base unit of the CapStash network.
 
-Translations are periodically pulled from Transifex and merged into the git repository. See the
-[translation process](doc/translation_process.md) for details on how this works.
+Every Cap represents a unit of value secured by a living decentralized system of miners, nodes, and users. Like the physical caps of the wasteland, digital Caps are designed around the same core principles:
 
-**Important**: We do not accept translation changes as GitHub pull requests because the next
-pull from Transifex would automatically overwrite them again.
+- recognizable
+- countable
+- limited by effort
+- useful in trade
+- trusted because the network says so, not because a central authority does
+
+In a dead world, value belongs to whatever still works.
+
+Caps still work.
+
+---
+
+## Why Caps?
+
+Because bottle caps were never just a joke.
+
+They were one of fiction’s greatest monetary symbols: absurd at first glance, then strangely perfect the longer you think about them. A bottle cap is small, standardized, portable, and culturally sticky. In Fallout, it became money because people believed in it long enough for it to become real.
+
+CapStash takes that same leap.
+
+It asks a simple question:
+
+What if the wasteland had a blockchain?
+
+What if the currency of survivors wasn’t locked in vaults, controlled by institutions, or printed into meaninglessness—but instead emerged from computation, scarcity, and collective agreement?
+
+What if the bottle cap grew teeth?
+
+---
+
+## CapStash Core
+
+CapStash Core is the reference full-node wallet for the CapStash network.
+
+It is built to feel less like a financial app and more like a machine recovered from the ruins:
+- terminal-born
+- phosphor-lit
+- heavy with atmosphere
+- engineered to feel like a working artifact from another timeline
+
+It does not just hold the currency.
+
+It inhabits the world the currency belongs to.
+
+---
+
+## The Idea
+
+CapStash is built on a simple premise:
+
+When the old world dies, money does not disappear.  
+It mutates into whatever the survivors trust.
+
+In fiction, that was the bottle cap.
+
+In software, that is CapStash.
