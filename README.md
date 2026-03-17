@@ -1,4 +1,11 @@
+<div align="center">
 
+[![Total Downloads](https://img.shields.io/github/downloads/CapStash/CapStash-Core/total?label=Total%20Downloads)](https://github.com/CapStash/CapStash-Core/releases)
+[![v27.0.0 Downloads](https://img.shields.io/github/downloads/CapStash/CapStash-Core/v27.0.0/total?label=v27.0.0%20Downloads)](https://github.com/CapStash/CapStash-Core/releases/tag/v27.0.0)
+[![Latest Release](https://img.shields.io/github/v/release/CapStash/CapStash-Core?label=Latest%20Release)](https://github.com/CapStash/CapStash-Core/releases)
+[![Discord](https://img.shields.io/badge/Discord-Join%20the%20Bunker-5865F2?logo=discord&logoColor=white)](https://discord.gg/Cs8PRZQb)
+
+</div>
 
 # ☢️ CapStash Core ☢️
 
