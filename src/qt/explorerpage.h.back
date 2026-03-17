@@ -1,0 +1,96 @@
+#ifndef CAPSTASH_QT_EXPLORERPAGE_H
+#define CAPSTASH_QT_EXPLORERPAGE_H
+
+#include <QMap>
+#include <QString>
+#include <QStringList>
+#include <QWidget>
+#include <QSet>
+
+class ClientModel;
+class QLineEdit;
+class QPushButton;
+class QLabel;
+class QListWidget;
+class QListWidgetItem;
+class QPlainTextEdit;
+class QTimer;
+class QScrollBar;
+class QCheckBox;
+class QScrollArea;
+
+class UniValue;
+class NetworkStatsGraphWidget;
+class ExplorerPage : public QWidget
+{
+public:
+    explicit ExplorerPage(QWidget* parent = nullptr);
+
+    void setClientModel(ClientModel* model);
+
+private:
+    void buildUi();
+    void refreshNetworkStats();
+    void refreshTip();
+    void refreshCurrentView();
+    void loadInitialBlocks();
+    void appendOlderBlocks(int count);
+    void prependNewBlocks(int new_tip_height);
+
+    void loadBlockRow(int height);
+    bool showBlockByHeight(int height);
+    bool showBlockByHash(const QString& block_hash);
+    bool showTransaction(const QString& txid);
+    void showAddress(const QString& address);
+
+    void onSearchClicked();
+    void onSearchReturnPressed();
+    void onBlockItemClicked(QListWidgetItem* item);
+    void onTxItemClicked(QListWidgetItem* item);
+    void onBlockListScrollChanged(int value);
+    void onDetailedToggled(bool checked);
+    void onDetailLinkClicked(const QString& link);
+    
+    QString rpcGetBlockHash(int height) const;
+    int rpcGetBlockCount() const;
+    QStringList rpcDecodeScriptAddresses(const QString& script_hex) const;
+
+    QStringList addressesFromScriptPubKey(const UniValue& spk) const;
+    double valueAsDouble(const UniValue& value) const;
+
+    QString makeBlockListLabel(int height, const UniValue& block) const;
+    QString makeTxListLabel(const UniValue& tx) const;
+
+    QString formatBlockForDisplay(const UniValue& block) const;
+    QString formatTxForDisplay(const UniValue& tx) const;
+    QString formatAddressForDisplay(const QString& address) const;
+    QSet<QString> collectInputAddressesForTx(const UniValue& tx) const;
+
+private:
+    ClientModel* m_client_model{nullptr};
+    NetworkStatsGraphWidget* m_networkStatsGraph{nullptr};
+    QLineEdit* m_searchEdit{nullptr};
+    QPushButton* m_searchButton{nullptr};
+    QCheckBox* m_detailedToggle{nullptr};
+    QLabel* m_statusLabel{nullptr};
+
+    QListWidget* m_blockList{nullptr};
+    QListWidget* m_txList{nullptr};
+    QLabel*      m_detailView{nullptr};
+    QScrollArea* m_detailScroll{nullptr};
+
+    QTimer* m_updateTimer{nullptr};
+
+    int m_loadedOldestHeight{-1};
+    int m_knownTipHeight{-1};
+    bool m_loadingMore{false};
+
+    QString m_currentBlockHash;
+    QString m_currentBlockJson;
+    QMap<QString, QString> m_cachedTxJson;
+
+    QString m_lastViewKind;
+    QString m_lastViewValue;
+};
+
+#endif // CAPSTASH_QT_EXPLORERPAGE_H

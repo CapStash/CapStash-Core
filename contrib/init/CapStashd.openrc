@@ -1,0 +1,93 @@
+#!/sbin/openrc-run
+
+# backward compatibility for existing gentoo layout 
+#
+if [ -d "/var/lib/CapStash/.CapStash" ]; then
+	CAPSTASHD_DEFAULT_DATADIR="/var/lib/CapStash/.CapStash"
+else
+	CAPSTASHD_DEFAULT_DATADIR="/var/lib/CapStashd"
+fi
+
+CAPSTASHD_CONFIGFILE=${CAPSTASHD_CONFIGFILE:-/etc/CapStash/CapStash.conf}
+CAPSTASHD_PIDDIR=${CAPSTASHD_PIDDIR:-/var/run/CapStashd}
+CAPSTASHD_PIDFILE=${CAPSTASHD_PIDFILE:-${CAPSTASHD_PIDDIR}/CapStashd.pid}
+CAPSTASHD_DATADIR=${CAPSTASHD_DATADIR:-${CAPSTASHD_DEFAULT_DATADIR}}
+CAPSTASHD_USER=${CAPSTASHD_USER:-${CAPSTASH_USER:-CapStash}}
+CAPSTASHD_GROUP=${CAPSTASHD_GROUP:-CapStash}
+CAPSTASHD_BIN=${CAPSTASHD_BIN:-/usr/bin/CapStashd}
+CAPSTASHD_NICE=${CAPSTASHD_NICE:-${NICELEVEL:-0}}
+CAPSTASHD_OPTS="${CAPSTASHD_OPTS:-${CAPSTASH_OPTS}}"
+
+name="CapStash Core Daemon"
+description="CapStash cryptocurrency P2P network daemon"
+
+command="/usr/bin/CapStashd"
+command_args="-pid=\"${CAPSTASHD_PIDFILE}\" \
+		-conf=\"${CAPSTASHD_CONFIGFILE}\" \
+		-datadir=\"${CAPSTASHD_DATADIR}\" \
+		-daemon \
+		${CAPSTASHD_OPTS}"
+
+required_files="${CAPSTASHD_CONFIGFILE}"
+start_stop_daemon_args="-u ${CAPSTASHD_USER} \
+			-N ${CAPSTASHD_NICE} -w 2000"
+pidfile="${CAPSTASHD_PIDFILE}"
+
+# The retry schedule to use when stopping the daemon. Could be either
+# a timeout in seconds or multiple signal/timeout pairs (like
+# "SIGKILL/180 SIGTERM/300")
+retry="${CAPSTASHD_SIGTERM_TIMEOUT}"
+
+depend() {
+	need localmount net
+}
+
+# verify
+# 1) that the datadir exists and is writable (or create it)
+# 2) that a directory for the pid exists and is writable
+# 3) ownership and permissions on the config file
+start_pre() {
+	checkpath \
+	-d \
+	--mode 0750 \
+	--owner "${CAPSTASHD_USER}:${CAPSTASHD_GROUP}" \
+	"${CAPSTASHD_DATADIR}"
+
+	checkpath \
+	-d \
+	--mode 0755 \
+	--owner "${CAPSTASHD_USER}:${CAPSTASHD_GROUP}" \
+	"${CAPSTASHD_PIDDIR}"
+
+	checkpath -f \
+	-o "${CAPSTASHD_USER}:${CAPSTASHD_GROUP}" \
+	-m 0660 \
+	"${CAPSTASHD_CONFIGFILE}"
+
+	checkconfig || return 1
+}
+
+checkconfig()
+{
+	if grep -qs '^rpcuser=' "${CAPSTASHD_CONFIGFILE}" && \
+		! grep -qs '^rpcpassword=' "${CAPSTASHD_CONFIGFILE}" ; then
+		eerror ""
+		eerror "ERROR: You must set a secure rpcpassword to run CapStashd."
+		eerror "The setting must appear in ${CAPSTASHD_CONFIGFILE}"
+		eerror ""
+		eerror "This password is security critical to securing wallets "
+		eerror "and must not be the same as the rpcuser setting."
+		eerror "You can generate a suitable random password using the following "
+		eerror "command from the shell:"
+		eerror ""
+		eerror "bash -c 'tr -dc a-zA-Z0-9 < /dev/urandom | head -c32 && echo'"
+		eerror ""
+		eerror "It is recommended that you also set alertnotify so you are "
+		eerror "notified of problems:"
+		eerror ""
+		eerror "ie: alertnotify=echo %%s | mail -s \"CapStash Alert\"" \
+			"admin@foo.com"
+		eerror ""
+		return 1
+	fi
+}

@@ -1,0 +1,11 @@
+--- a/qtbase/src/3rdparty/zlib/src/gzguts.h
++++ b/qtbase/src/3rdparty/zlib/src/gzguts.h
+@@ -7,9 +7,10 @@
+ #  ifndef _LARGEFILE64_SOURCE
+ #    define _LARGEFILE64_SOURCE 1
+ #  endif
+ #  ifdef _FILE_OFFSET_BITS
+ #    undef _FILE_OFFSET_BITS
++#    undef _TIME_BITS
+ #  endif
+ #endif

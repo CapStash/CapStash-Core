@@ -1,0 +1,397 @@
+/* Portions Copyright (c) 2009-2021 The Bitcoin Core developers */
+/* Portions Copyright (c) 2026 The CapStash Core & BitcoinII Core developers */
+/* */
+/* This file contains modifications and additions specific to CapStash. */
+/* Original upstream portions remain subject to their original license terms. */
+/* CapStash-specific original additions are not licensed for reuse, */
+/* modification, or redistribution absent prior written permission */
+/* from the copyright holder. */
+/* Contact: satooshi@bitcoin-ii.org */
+/* Base */
+QWidget {
+  background-color: %BG%;
+  color: %TEXT%;
+  selection-background-color: %SELECTION_BG%;
+  selection-color: %SELECTION_TEXT%;
+  font-family: "Roboto Mono", "Menlo", "DejaVu Sans Mono", monospace;
+}
+
+/* Panels / group boxes */
+QGroupBox, QFrame {
+  border: 1px solid %BORDER%;
+  border-radius: 4px;
+  background-color: %PANEL%;
+  margin-top: 8px;
+}
+QGroupBox::title {
+  subcontrol-origin: margin;
+  left: 8px;
+  padding: 0 4px;
+  color: %ACCENT%;
+  font-weight: 700;
+}
+
+/* Inputs */
+QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox {
+  background: %PANEL%;
+  border: 1px solid %BORDER%;
+  padding: 4px 6px;
+  selection-background-color: %SELECTION_BG%;
+}
+
+QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+  border-color: %SELECTION_BG%;
+}
+
+
+
+/* Buttons */
+QPushButton {
+  background-color: %PANEL%;
+  border: 1px solid %SELECTION_BG%;
+  padding: 6px 10px;
+}
+QPushButton:hover {
+  border-color: %ACCENT%;
+  color: %ACCENT%;
+}
+QPushButton:pressed { background-color: %PRESSED%; }
+
+/* Check/Radio */
+QCheckBox, QRadioButton { spacing: 6px; }
+QCheckBox::indicator, QRadioButton::indicator {
+  width: 14px;
+  height: 14px;
+}
+QCheckBox::indicator:checked, QRadioButton::indicator:checked {
+  background: %SELECTION_BG%;
+  border: 1px solid %ACCENT%;
+}
+QCheckBox::indicator:unchecked, QRadioButton::indicator:unchecked {
+  background: %PANEL%;
+  border: 1px solid %BORDER%;
+}
+
+/* Lists / tables */
+QTreeView, QTableView, QListView {
+  background: %PANEL%;
+  alternate-background-color: %ALT_PANEL%;
+  gridline-color: %BORDER%;
+  color: %TEXT%;
+}
+
+QHeaderView::section {
+  background: %PANEL%;
+  border: 1px solid %BORDER%;
+  padding: 4px;
+  color: %ACCENT%;
+  font-weight: 700;
+}
+
+QTableView::item:selected, QTreeView::item:selected, QListView::item:selected {
+  background: %SELECTION_BG%;
+  color: %SELECTION_TEXT%;
+}
+
+/* Tabs */
+QTabBar::tab {
+  background: %PANEL%;
+  color: %TEXT%;
+  padding: 6px 10px;
+  border: 1px solid %BORDER%;
+  border-bottom: none;
+}
+QTabBar::tab:selected {
+  color: %SELECTION_TEXT%;
+  background: %SELECTION_BG%;
+  border-color: %SELECTION_BG%;
+  font-weight: 700;
+}
+QTabBar::tab:hover {
+  color: %ACCENT%;
+}
+QTabWidget::pane {
+  border: 1px solid %BORDER%;
+  top: -1px;
+}
+
+/* Links / status */
+QLabel { color: %TEXT%; }
+QLabel[qt_property_link="true"], .link { color: %LINK%; }
+QStatusBar {
+  background: %BG%;
+  color: %TEXT%;
+}
+
+/* Progress bars */
+QProgressBar {
+  background: %PANEL%;
+  border: 1px solid %BORDER%;
+  text-align: center;
+  color: %SELECTION_TEXT%;
+}
+QProgressBar::chunk { background: %SELECTION_BG%; }
+
+/* ----- Dialogs & Message boxes ----- */
+QDialog, QMessageBox {
+  background-color: %PANEL%;
+  color: %TEXT%;
+  border: 1px solid %SELECTION_BG%;
+}
+QDialog > QLabel, QMessageBox QLabel, QDialog > QPlainTextEdit, QDialog > QTextEdit {
+  color: %TEXT%;
+}
+QDialogButtonBox QPushButton, QMessageBox QPushButton {
+  background-color: %PANEL%;
+  border: 1px solid %SELECTION_BG%;
+  padding: 6px 10px;
+}
+QDialogButtonBox QPushButton:hover, QMessageBox QPushButton:hover {
+  border-color: %ACCENT%;
+  color: %ACCENT%;
+}
+QDialogButtonBox QPushButton:pressed, QMessageBox QPushButton:pressed {
+  background-color: %PRESSED%;
+}
+
+/* ---------- Tooltips & menus ---------- */
+QToolTip {
+  background-color: %PANEL%;
+  color: %TEXT%;
+  border: 1px solid %SELECTION_BG%;
+  padding: 4px 6px;
+}
+QMenu {
+  background-color: %PANEL%;
+  color: %TEXT%;
+  border: 1px solid %BORDER%;
+}
+QMenu::item { padding: 6px 12px; }
+QMenu::item:selected {
+  background: %SELECTION_BG%;
+  color: %SELECTION_TEXT%;
+}
+
+/* ---------- Modal overlay ---------- */
+ModalOverlay, QWidget#modalOverlay {
+  background-color: %MODAL_BG%;
+  color: %TEXT%;
+  border: 1px solid %MODAL_BORDER%;
+}
+ModalOverlay QLabel, QWidget#modalOverlay QLabel {
+  color: %TEXT%;
+}
+ModalOverlay QProgressBar, QWidget#modalOverlay QProgressBar {
+  background: %PANEL%;
+  border: 1px solid %BORDER%;
+  text-align: center;
+  color: %SELECTION_TEXT%;
+}
+ModalOverlay QProgressBar::chunk, QWidget#modalOverlay QProgressBar::chunk {
+  background: %SELECTION_BG%;
+}
+
+QWidget#modalOverlay * { color: %TEXT%; }
+QWidget#modalOverlay QLabel a { color: %LINK%; }
+
+QWidget#modalOverlay QPushButton {
+  background-color: %PANEL%;
+  color: %TEXT%;
+  border: 1px solid %SELECTION_BG%;
+  padding: 4px 8px;
+}
+QWidget#modalOverlay QPushButton:hover {
+  border-color: %ACCENT%;
+  color: %ACCENT%;
+}
+QWidget#modalOverlay QPushButton:pressed { background-color: %PRESSED%; }
+
+QWidget#modalOverlay QCheckBox::indicator,
+QWidget#modalOverlay QRadioButton::indicator {
+  width: 14px;
+  height: 14px;
+  border: 1px solid %SELECTION_BG%;
+  background: %PANEL%;
+}
+QWidget#modalOverlay QCheckBox::indicator:checked,
+QWidget#modalOverlay QRadioButton::indicator:checked {
+  background: %SELECTION_BG%;
+  border-color: %ACCENT%;
+}
+
+QWidget#modalOverlay QGroupBox::title { color: %ACCENT%; }
+QWidget#modalOverlay QFrame {
+  border: 1px solid %BORDER%;
+  background: transparent;
+}
+
+/* Theme toggle */
+QWidget#themeToggle {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+QWidget#themeToggle QLabel#themeToggleLabel {
+  color: %TEXT%;
+  padding-right: 6px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  background: transparent;
+  border: 0;
+}
+
+QFrame#themeTogglePill {
+  background: %PANEL%;
+  border: 1px solid %BORDER%;
+  border-radius: 9px;
+  padding: 1px;
+  margin-top: 0;
+}
+
+QFrame#themeTogglePill:hover {
+  border-color: %BORDER%;
+}
+
+QFrame#themeTogglePill QToolButton {
+  min-width: 72px;
+  min-height: 14px;
+  padding: 1px 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: %TEXT%;
+  font-weight: 700;
+}
+
+QFrame#themeTogglePill QToolButton:hover {
+  background: %PANEL%;
+  border-color: %BORDER%;
+  color: %ACCENT%;
+}
+
+QFrame#themeTogglePill QToolButton:pressed {
+  background: %PRESSED%;
+}
+
+QFrame#themeTogglePill QToolButton:checked {
+  background: %SELECTION_BG%;
+  color: %SELECTION_TEXT%;
+  border: 1px solid %BORDER%;
+}
+
+QFrame#themeTogglePill QToolButton:checked:hover {
+  border-color: %BORDER%;
+}
+
+/* ------------------------------------------------------------------ */
+/* Explorer page                                                       */
+/* ------------------------------------------------------------------ */
+
+QFrame#explorerBlockPane,
+QFrame#explorerTxPane,
+QFrame#explorerDetailPane {
+  background-color: %PANEL%;
+  border: 1px solid %BORDER%;
+  border-radius: 4px;
+}
+
+QLabel#explorerBlockTitle,
+QLabel#explorerTxTitle,
+QLabel#explorerDetailTitle {
+  font-weight: bold;
+  color: %TEXT%;
+  padding: 4px 6px 4px 6px;
+}
+
+/* Keep mempool header intentionally red */
+QLabel#explorerMempoolTitle {
+  font-weight: bold;
+  color: #ff4444;
+  background-color: #220000;
+  border: 1px solid #ff4444;
+  border-radius: 4px;
+  padding: 6px 8px 6px 8px;
+}
+
+QLineEdit#explorerSearchEdit {
+  background-color: %PANEL%;
+  color: %TEXT%;
+  border: 1px solid %BORDER%;
+  padding: 5px 8px 5px 8px;
+  selection-background-color: %SELECTION_BG%;
+  selection-color: %SELECTION_TEXT%;
+}
+QLineEdit#explorerSearchEdit:focus {
+  border-color: %SELECTION_BG%;
+}
+
+QPushButton#explorerSearchButton {
+  background-color: %PANEL%;
+  color: %TEXT%;
+  border: 1px solid %SELECTION_BG%;
+  padding: 5px 10px 5px 10px;
+}
+QPushButton#explorerSearchButton:hover {
+  border-color: %ACCENT%;
+  color: %ACCENT%;
+}
+QPushButton#explorerSearchButton:pressed {
+  background-color: %PRESSED%;
+}
+
+QCheckBox#explorerDetailedToggle,
+QLabel#explorerStatusLabel {
+  color: %TEXT%;
+}
+
+QTreeWidget#explorerMempoolList,
+QTreeWidget#explorerBlockList {
+  background-color: %PANEL%;
+  alternate-background-color: %ALT_PANEL%;
+  color: %TEXT%;
+  border: 1px solid %BORDER%;
+  outline: 0;
+}
+
+QTreeWidget#explorerMempoolList::item,
+QTreeWidget#explorerBlockList::item {
+  padding: 2px 6px 2px 6px;
+}
+
+QTreeWidget#explorerMempoolList::item:selected,
+QTreeWidget#explorerBlockList::item:selected {
+  background-color: %SELECTION_BG%;
+  color: %SELECTION_TEXT%;
+}
+
+QTreeWidget#explorerMempoolList QHeaderView::section,
+QTreeWidget#explorerBlockList QHeaderView::section {
+  background: %PANEL%;
+  border: 1px solid %BORDER%;
+  padding: 4px 6px 4px 6px;
+  color: %ACCENT%;
+}
+
+QListWidget#explorerTxList {
+  background-color: %PANEL%;
+  color: %TEXT%;
+  border: 1px solid %BORDER%;
+  outline: 0;
+}
+
+QListWidget#explorerTxList::item {
+  padding: 2px 6px 2px 6px;
+}
+
+QListWidget#explorerTxList::item:selected {
+  background-color: %SELECTION_BG%;
+  color: %SELECTION_TEXT%;
+}
+
+QLabel#explorerDetailView {
+  background-color: %PANEL%;
+  color: %TEXT%;
+  border: 1px solid %BORDER%;
+  padding: 8px;
+}

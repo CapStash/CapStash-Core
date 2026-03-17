@@ -1,0 +1,33 @@
+# /etc/conf.d/CapStashd: config file for /etc/init.d/CapStashd
+
+# Config file location
+#CAPSTASHD_CONFIGFILE="/etc/CapStash/CapStash.conf"
+
+# What directory to write pidfile to?  (created and owned by $CAPSTASHD_USER)
+#CAPSTASHD_PIDDIR="/var/run/CapStashd"
+
+# What filename to give the pidfile
+#CAPSTASHD_PIDFILE="${CAPSTASHD_PIDDIR}/CapStashd.pid"
+
+# Where to write CapStashd data (be mindful that the blockchain is large)
+#CAPSTASHD_DATADIR="/var/lib/CapStashd"
+
+# User and group to own CapStashd process
+#CAPSTASHD_USER="CapStash"
+#CAPSTASHD_GROUP="CapStash"
+
+# Path to CapStashd executable
+#CAPSTASHD_BIN="/usr/bin/CapStashd"
+
+# Nice value to run CapStashd under
+#CAPSTASHD_NICE=0
+
+# Additional options (avoid -conf and -datadir, use flags above)
+#CAPSTASHD_OPTS=""
+
+# The timeout in seconds OpenRC will wait for CapStashd to terminate
+# after a SIGTERM has been raised.
+# Note that this will be mapped as argument to start-stop-daemon's
+# '--retry' option, which means you can specify a retry schedule
+# here. For more information see man 8 start-stop-daemon.
+CAPSTASHD_SIGTERM_TIMEOUT=600

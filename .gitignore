@@ -1,0 +1,35 @@
+# build artifacts
+*.o
+*.lo
+*.la
+*.a
+*.so
+*.so.*
+.deps/
+.libs/
+autom4te.cache/
+config.log
+config.status
+libtool
+Makefile
+src/Makefile
+test/Makefile
+
+# editor junk
+*~
+*.swp
+*.swo
+
+# python
+*.pyc
+__pycache__/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# depends cached downloads
+depends/sources/
+
+# optional local build outputs
+build/

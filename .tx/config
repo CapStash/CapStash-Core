@@ -1,0 +1,7 @@
+[main]
+host = https://www.transifex.com
+
+[o:CapStash:p:CapStash:r:qt-translation-027x]
+file_filter = src/qt/locale/CapStash_<lang>.xlf
+source_file = src/qt/locale/CapStash_en.xlf
+source_lang = en

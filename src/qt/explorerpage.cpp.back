@@ -1,0 +1,1570 @@
+#include <qt/explorerpage.h>
+
+#include <qt/clientmodel.h>
+
+#include <QCheckBox>
+#include <QDateTime>
+#include <QFrame>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QPlainTextEdit> // (ok if unused)
+#include <QPushButton>
+#include <QScrollArea>
+#include <QScrollBar>
+#include <QSet>
+#include <QSplitter>
+#include <QTimer>
+#include <QVBoxLayout>
+
+#include <algorithm>
+#include <qt/networkstatsgraphwidget.h>
+#include <interfaces/node.h>
+#include <univalue.h>
+
+namespace {
+
+QString ToQString(const UniValue& value)
+{
+    if (value.isNull()) return QString();
+    if (value.isStr()) return QString::fromStdString(value.get_str());
+    return QString::fromStdString(value.write());
+}
+
+bool LooksLikeHex64(const QString& s)
+{
+    if (s.size() != 64) return false;
+    for (QChar c : s) {
+        const ushort u = c.unicode();
+        const bool is_num = (u >= '0' && u <= '9');
+        const bool is_lo = (u >= 'a' && u <= 'f');
+        const bool is_hi = (u >= 'A' && u <= 'F');
+        if (!(is_num || is_lo || is_hi)) return false;
+    }
+    return true;
+}
+
+bool ParseJson(const QString& text, UniValue& out)
+{
+    if (text.isEmpty()) return false;
+    return out.read(text.toStdString());
+}
+
+QString FirstAddressFromScriptPubKey(const UniValue& spk)
+{
+    if (!spk.isObject()) return QString();
+
+    const UniValue& address = spk.find_value("address");
+    if (address.isStr()) return QString::fromStdString(address.get_str());
+
+    const UniValue& addresses = spk.find_value("addresses");
+    if (addresses.isArray() && addresses.size() > 0 && addresses[0].isStr()) {
+        return QString::fromStdString(addresses[0].get_str());
+    }
+
+    return QString();
+}
+
+QString FormatAmountFromDouble(double amount)
+{
+    return QString::number(amount, 'f', 8) + QStringLiteral(" CAP");
+}
+
+static void PushRecent(QStringList& lines, const QString& line, int max_keep = -1)
+{
+    lines.push_back(line);
+
+    // max_keep <= 0 means "keep everything"
+    if (max_keep <= 0) return;
+
+    while (lines.size() > max_keep) {
+        lines.removeFirst();
+    }
+}
+
+QString FormatUnixTime(const UniValue& value)
+{
+    if (value.isNull()) return QString();
+
+    bool ok = false;
+    qint64 ts = ToQString(value).toLongLong(&ok);
+    if (!ok || ts <= 0) return QString();
+
+    const QDateTime dt = QDateTime::fromSecsSinceEpoch(ts, Qt::LocalTime);
+    return dt.toString("yyyy-MM-dd hh:mm:ss");
+}
+
+QString HumanTimeOrRaw(const UniValue& value)
+{
+    const QString friendly = FormatUnixTime(value);
+    if (!friendly.isEmpty()) return friendly;
+    return ToQString(value);
+}
+
+// --- HTML helpers for clickable drill-down in QLabel ---
+
+static QString H(const QString& s) { return s.toHtmlEscaped(); }
+
+// Force link color to RED via inline style so themes/palettes can't override it.
+static QString LinkTx(const QString& txid, const QString& label = QString())
+{
+    const QString text = label.isEmpty() ? txid : label;
+    return QString("<a style=\"color:#ff3b3b;\" href=\"cap:tx:%1\">%2</a>").arg(H(txid), H(text));
+}
+
+static QString LinkBlockHash(const QString& bh, const QString& label = QString())
+{
+    const QString text = label.isEmpty() ? bh : label;
+    return QString("<a style=\"color:#ff3b3b;\" href=\"cap:block:%1\">%2</a>").arg(H(bh), H(text));
+}
+
+static QString LinkBlockHeight(int height, const QString& label = QString())
+{
+    const QString text = label.isEmpty() ? QString::number(height) : label;
+    return QString("<a style=\"color:#ff3b3b;\" href=\"cap:blockheight:%1\">%2</a>").arg(height).arg(H(text));
+}
+
+static QString LinkAddr(const QString& a)
+{
+    return QString("<a style=\"color:#ff3b3b;\" href=\"cap:addr:%1\">%2</a>").arg(H(a), H(a));
+}
+
+static QString SmallMono(const QString& s)
+{
+    return QString("<span style=\"font-family:monospace;\">%1</span>").arg(H(s));
+}
+
+static QString ShortHash(const QString& h, int keep = 16)
+{
+    if (h.size() <= keep) return h;
+    return h.left(keep) + QStringLiteral("…");
+}
+
+} // namespace
+
+ExplorerPage::ExplorerPage(QWidget* parent) : QWidget(parent)
+{
+    buildUi();
+
+    m_updateTimer = new QTimer(this);
+    m_updateTimer->setInterval(3000);
+    connect(m_updateTimer, &QTimer::timeout, this, &ExplorerPage::refreshTip);
+    m_updateTimer->start();
+}
+
+void ExplorerPage::setClientModel(ClientModel* model)
+{
+    m_client_model = model;
+    refreshNetworkStats();
+    loadInitialBlocks();
+}
+
+void ExplorerPage::buildUi()
+{
+    auto* root = new QVBoxLayout(this);
+
+    m_networkStatsGraph = new NetworkStatsGraphWidget(this);
+    m_networkStatsGraph->setMinimumHeight(100);
+    m_networkStatsGraph->setMaximumHeight(175);
+    root->addWidget(m_networkStatsGraph);
+
+    auto* topRow = new QHBoxLayout();
+    m_searchEdit = new QLineEdit(this);
+    m_searchEdit->setPlaceholderText(tr("Search block #, block hash, transaction ID, or address"));
+
+    m_searchButton = new QPushButton(tr("Search"), this);
+    m_detailedToggle = new QCheckBox(tr("Show Details"), this);
+    m_statusLabel = new QLabel(tr("Explorer idle"), this);
+
+    topRow->addWidget(m_searchEdit, 1);
+    topRow->addWidget(m_searchButton);
+    topRow->addWidget(m_detailedToggle);
+    topRow->addWidget(m_statusLabel);
+
+    root->addLayout(topRow);
+
+    auto* splitter = new QSplitter(this);
+
+    m_blockList = new QListWidget(splitter);
+
+    auto* rightPane = new QWidget(splitter);
+    auto* rightLayout = new QVBoxLayout(rightPane);
+
+    rightLayout->addWidget(new QLabel(tr("Transactions"), rightPane));
+    m_txList = new QListWidget(rightPane);
+    rightLayout->addWidget(m_txList, 1);
+
+    rightLayout->addWidget(new QLabel(tr("Details"), rightPane));
+
+    // QLabel + QScrollArea (Qt depends build may not include QTextBrowser)
+    m_detailView = new QLabel(rightPane);
+    m_detailView->setTextFormat(Qt::RichText);
+    m_detailView->setTextInteractionFlags(Qt::TextBrowserInteraction);
+    m_detailView->setOpenExternalLinks(false);
+    m_detailView->setWordWrap(true);
+
+    // IMPORTANT: Do NOT set QLabel base color here. That breaks your green theme.
+    // Link color is forced inline in the Link*() helpers.
+
+    connect(m_detailView, &QLabel::linkActivated, this, &ExplorerPage::onDetailLinkClicked);
+
+    m_detailScroll = new QScrollArea(rightPane);
+    m_detailScroll->setWidgetResizable(true);
+    m_detailScroll->setFrameShape(QFrame::NoFrame);
+    m_detailScroll->setWidget(m_detailView);
+    rightLayout->addWidget(m_detailScroll, 2);
+
+    splitter->addWidget(m_blockList);
+    splitter->addWidget(rightPane);
+    splitter->setStretchFactor(0, 1);
+    splitter->setStretchFactor(1, 2);
+
+    root->addWidget(splitter, 1);
+
+    connect(m_searchButton, &QPushButton::clicked, this, &ExplorerPage::onSearchClicked);
+    connect(m_searchEdit, &QLineEdit::returnPressed, this, &ExplorerPage::onSearchReturnPressed);
+    connect(m_blockList, &QListWidget::itemClicked, this, &ExplorerPage::onBlockItemClicked);
+    connect(m_txList, &QListWidget::itemClicked, this, &ExplorerPage::onTxItemClicked);
+    connect(m_blockList->verticalScrollBar(), &QScrollBar::valueChanged,
+            this, &ExplorerPage::onBlockListScrollChanged);
+    connect(m_detailedToggle, &QCheckBox::toggled, this, &ExplorerPage::onDetailedToggled);
+}
+
+void ExplorerPage::refreshNetworkStats()
+{
+    if (!m_client_model || !m_networkStatsGraph) return;
+
+    try {
+        UniValue params(UniValue::VARR);
+        UniValue result = m_client_model->node().executeRpc("getmininginfo", params, "/");
+        if (!result.isObject()) return;
+
+        const double network_hashps = valueAsDouble(result.find_value("networkhashps"));
+        const double difficulty = valueAsDouble(result.find_value("difficulty"));
+
+        m_networkStatsGraph->setStats(network_hashps, difficulty);
+    } catch (...) {
+    }
+}
+
+int ExplorerPage::rpcGetBlockCount() const
+{
+    if (!m_client_model) return -1;
+
+    UniValue params(UniValue::VARR);
+    UniValue result = m_client_model->node().executeRpc("getblockcount", params, "/");
+    return result.getInt<int>();
+}
+
+QString ExplorerPage::rpcGetBlockHash(int height) const
+{
+    if (!m_client_model) return QString();
+
+    UniValue params(UniValue::VARR);
+    params.push_back(height);
+    UniValue result = m_client_model->node().executeRpc("getblockhash", params, "/");
+    return QString::fromStdString(result.get_str());
+}
+
+QStringList ExplorerPage::rpcDecodeScriptAddresses(const QString& script_hex) const
+{
+    QStringList out;
+    if (!m_client_model || script_hex.isEmpty()) return out;
+
+    try {
+        UniValue params(UniValue::VARR);
+        params.push_back(script_hex.toStdString());
+
+        UniValue result = m_client_model->node().executeRpc("decodescript", params, "/");
+        if (!result.isObject()) return out;
+
+        const UniValue& address = result.find_value("address");
+        if (address.isStr()) out.push_back(QString::fromStdString(address.get_str()));
+
+        const UniValue& addresses = result.find_value("addresses");
+        if (addresses.isArray()) {
+            for (unsigned int i = 0; i < addresses.size(); ++i) {
+                if (!addresses[i].isStr()) continue;
+                const QString decoded = QString::fromStdString(addresses[i].get_str());
+                if (!out.contains(decoded)) out.push_back(decoded);
+            }
+        }
+
+        const UniValue& segwit = result.find_value("segwit");
+        if (segwit.isObject()) {
+            const UniValue& segwit_addr = segwit.find_value("address");
+            if (segwit_addr.isStr()) {
+                const QString decoded = QString::fromStdString(segwit_addr.get_str());
+                if (!out.contains(decoded)) out.push_back(decoded);
+            }
+        }
+    } catch (...) {
+    }
+
+    return out;
+}
+
+QStringList ExplorerPage::addressesFromScriptPubKey(const UniValue& spk) const
+{
+    QStringList out;
+    if (!spk.isObject()) return out;
+
+    const QString direct = FirstAddressFromScriptPubKey(spk);
+    if (!direct.isEmpty()) out.push_back(direct);
+
+    const QString hex = ToQString(spk.find_value("hex"));
+    const QStringList decoded = rpcDecodeScriptAddresses(hex);
+    for (const QString& a : decoded) {
+        if (!out.contains(a)) out.push_back(a);
+    }
+
+    return out;
+}
+
+double ExplorerPage::valueAsDouble(const UniValue& value) const
+{
+    if (value.isNum()) return value.get_real();
+    bool ok = false;
+    const double d = ToQString(value).toDouble(&ok);
+    return ok ? d : 0.0;
+}
+
+// Build a best-effort set of input addresses for change detection.
+// NOTE: This is NOT wallet-aware and will miss "fresh change addresses".
+// It is kept for list labeling / fallback, but the TX view below uses wallet-aware ismine.
+QSet<QString> ExplorerPage::collectInputAddressesForTx(const UniValue& tx) const
+{
+    QSet<QString> in_addrs;
+    if (!m_client_model || !tx.isObject()) return in_addrs;
+
+    const UniValue& vin = tx.find_value("vin");
+    if (!vin.isArray()) return in_addrs;
+
+    // Coinbase has no real input addresses.
+    if (vin.size() > 0 && vin[0].find_value("coinbase").isStr()) return in_addrs;
+
+    for (unsigned int i = 0; i < vin.size(); ++i) {
+        const UniValue& in = vin[i];
+        if (!in.isObject()) continue;
+        if (in.find_value("coinbase").isStr()) continue;
+
+        const QString prev_txid = ToQString(in.find_value("txid"));
+        bool ok = false;
+        const int prev_vout = ToQString(in.find_value("vout")).toInt(&ok);
+        if (prev_txid.isEmpty() || !ok || prev_vout < 0) continue;
+
+        // Fetch prev tx to resolve prevout scriptPubKey addresses
+        try {
+            UniValue prev_params(UniValue::VARR);
+            prev_params.push_back(prev_txid.toStdString());
+            prev_params.push_back(true);
+
+            UniValue prev_tx = m_client_model->node().executeRpc("getrawtransaction", prev_params, "/");
+            if (!prev_tx.isObject()) continue;
+
+            const UniValue& prev_vouts = prev_tx.find_value("vout");
+            if (!prev_vouts.isArray()) continue;
+            if ((unsigned int)prev_vout >= prev_vouts.size()) continue;
+
+            const UniValue& prev_out = prev_vouts[prev_vout];
+            const UniValue& spk = prev_out.find_value("scriptPubKey");
+            const QStringList addrs = addressesFromScriptPubKey(spk);
+            for (const QString& a : addrs) {
+                if (!a.isEmpty()) in_addrs.insert(a);
+            }
+        } catch (...) {
+            continue;
+        }
+    }
+
+    return in_addrs;
+}
+
+QString ExplorerPage::makeBlockListLabel(int height, const UniValue& block) const
+{
+    if (!block.isObject()) {
+        return tr("#%1").arg(height);
+    }
+
+    const UniValue& txs = block.find_value("tx");
+    const int tx_count = txs.isArray() ? static_cast<int>(txs.size()) : 0;
+
+    QString reward_text;
+    if (txs.isArray() && txs.size() > 0 && txs[0].isObject()) {
+        const UniValue& coinbase = txs[0];
+        const UniValue& vout = coinbase.find_value("vout");
+        double reward = 0.0;
+        if (vout.isArray()) {
+            for (unsigned int i = 0; i < vout.size(); ++i) {
+                reward += valueAsDouble(vout[i].find_value("value"));
+            }
+        }
+        reward_text = FormatAmountFromDouble(reward);
+    }
+
+    if (!reward_text.isEmpty()) {
+        return tr("#%1 — %2 tx — Reward %3").arg(height).arg(tx_count).arg(reward_text);
+    }
+
+    return tr("#%1 — %2 tx").arg(height).arg(tx_count);
+}
+
+QString ExplorerPage::makeTxListLabel(const UniValue& tx) const
+{
+    if (!tx.isObject()) return tr("Transaction");
+
+    const UniValue& vin = tx.find_value("vin");
+    const bool is_coinbase =
+        vin.isArray() && vin.size() > 0 && vin[0].find_value("coinbase").isStr();
+
+    const QString conf_text = ToQString(tx.find_value("confirmations"));
+    bool ok_conf = false;
+    const int conf_count = conf_text.toInt(&ok_conf);
+
+    const QSet<QString> input_addrs = (!is_coinbase) ? collectInputAddressesForTx(tx) : QSet<QString>{};
+
+    const UniValue& vout = tx.find_value("vout");
+    double total_out = 0.0;
+    QString best_to;
+
+    if (vout.isArray()) {
+        // Prefer a recipient address that is NOT a change-like output (not seen in inputs)
+        for (unsigned int i = 0; i < vout.size(); ++i) {
+            const UniValue& outv = vout[i];
+            total_out += valueAsDouble(outv.find_value("value"));
+
+            if (best_to.isEmpty()) {
+                const QStringList addrs = addressesFromScriptPubKey(outv.find_value("scriptPubKey"));
+                for (const QString& a : addrs) {
+                    if (a.isEmpty()) continue;
+                    if (!is_coinbase && input_addrs.contains(a)) {
+                        // Looks like change; skip as "best_to"
+                        continue;
+                    }
+                    best_to = a;
+                    break;
+                }
+            }
+        }
+        // If everything looked like change (or we couldn't resolve inputs), fall back to first address
+        if (best_to.isEmpty()) {
+            for (unsigned int i = 0; i < vout.size(); ++i) {
+                const UniValue& outv = vout[i];
+                const QStringList addrs = addressesFromScriptPubKey(outv.find_value("scriptPubKey"));
+                for (const QString& a : addrs) {
+                    if (!a.isEmpty()) {
+                        best_to = a;
+                        break;
+                    }
+                }
+                if (!best_to.isEmpty()) break;
+            }
+        }
+    }
+
+    const QString amount_text = FormatAmountFromDouble(total_out);
+
+    if (is_coinbase) {
+        QString maturity_text;
+
+        if (ok_conf && conf_count > 0) {
+            if (conf_count >= 101) {
+                maturity_text = tr("Mature");
+            } else {
+                maturity_text = tr("Immature (%1 of 100)").arg(conf_count);
+            }
+        } else {
+            maturity_text = tr("Pending");
+        }
+
+        return tr("Mining Reward - %1 — %2").arg(maturity_text, amount_text);
+    }
+
+    if (!best_to.isEmpty()) {
+        return tr("To %1 — %2").arg(best_to, amount_text);
+    }
+
+    return tr("Transfer — %1").arg(amount_text);
+}
+
+QString ExplorerPage::formatBlockForDisplay(const UniValue& block) const
+{
+    if (!block.isObject()) {
+        return QString("<pre>%1</pre>").arg(QString::fromStdString(block.write(2)).toHtmlEscaped());
+    }
+
+    const QString hash = ToQString(block.find_value("hash"));
+    const QString height = ToQString(block.find_value("height"));
+    const QString conf = ToQString(block.find_value("confirmations"));
+
+    if (m_detailedToggle && m_detailedToggle->isChecked()) {
+        QString out;
+        out += "<b>Block</b><br>";
+        out += tr("hash: %1<br>").arg(LinkBlockHash(hash, hash));
+        out += tr("confirmations: %1<br>").arg(H(conf));
+        out += tr("height: %1<br>").arg(H(height));
+        out += tr("version: %1<br>").arg(H(ToQString(block.find_value("version"))));
+        out += tr("versionHex: %1<br>").arg(H(ToQString(block.find_value("versionHex"))));
+        out += tr("time: %1<br>").arg(H(HumanTimeOrRaw(block.find_value("time"))));
+        out += tr("mediantime: %1<br>").arg(H(HumanTimeOrRaw(block.find_value("mediantime"))));
+        out += tr("nonce: %1<br>").arg(H(ToQString(block.find_value("nonce"))));
+        out += tr("bits: %1<br>").arg(H(ToQString(block.find_value("bits"))));
+        out += tr("difficulty: %1<br>").arg(H(ToQString(block.find_value("difficulty"))));
+        out += tr("chainwork: %1<br>").arg(SmallMono(ToQString(block.find_value("chainwork"))));
+        out += tr("size: %1<br>").arg(H(ToQString(block.find_value("size"))));
+        out += tr("strippedsize: %1<br>").arg(H(ToQString(block.find_value("strippedsize"))));
+        out += tr("weight: %1<br>").arg(H(ToQString(block.find_value("weight"))));
+        out += tr("merkleroot: %1<br>").arg(SmallMono(ToQString(block.find_value("merkleroot"))));
+        out += tr("previousblockhash: %1<br>").arg(SmallMono(ToQString(block.find_value("previousblockhash"))));
+        out += tr("nextblockhash: %1<br>").arg(SmallMono(ToQString(block.find_value("nextblockhash"))));
+        const UniValue& txs = block.find_value("tx");
+        if (txs.isArray()) out += tr("tx count: %1<br>").arg((int)txs.size());
+        out += "<br><i>Select a transaction to inspect it.</i><br>";
+        return out;
+    }
+
+    QString out;
+    out += "<b>Block Summary</b><br>";
+    out += tr("Height: %1<br>").arg(H(height));
+    out += tr("Confirmations: %1<br>").arg(H(conf));
+    out += tr("Time: %1<br>").arg(H(HumanTimeOrRaw(block.find_value("time"))));
+
+    const UniValue& txs = block.find_value("tx");
+    if (txs.isArray()) out += tr("Transactions: %1<br>").arg((int)txs.size());
+
+    QString mined_to;
+    if (txs.isArray() && txs.size() > 0 && txs[0].isObject()) {
+        const UniValue& coinbase = txs[0];
+        const UniValue& vout = coinbase.find_value("vout");
+        double reward = 0.0;
+        if (vout.isArray()) {
+            for (unsigned int i = 0; i < vout.size(); ++i) {
+                const UniValue& outv = vout[i];
+                reward += valueAsDouble(outv.find_value("value"));
+                if (mined_to.isEmpty()) {
+                    const QStringList addrs = addressesFromScriptPubKey(outv.find_value("scriptPubKey"));
+                    if (!addrs.isEmpty()) mined_to = addrs.front();
+                }
+            }
+        }
+        if (!mined_to.isEmpty()) out += tr("Mined To: %1<br>").arg(LinkAddr(mined_to));
+        out += tr("Reward: %1<br>").arg(H(FormatAmountFromDouble(reward)));
+    }
+
+    out += tr("Block Hash: %1<br>").arg(LinkBlockHash(hash, hash));
+    out += "<br><i>Tip: click a transaction for a simple summary.</i><br>";
+    return out;
+}
+
+QString ExplorerPage::formatTxForDisplay(const UniValue& tx) const
+{
+    if (!tx.isObject()) {
+        return QString("<pre>%1</pre>").arg(QString::fromStdString(tx.write(2)).toHtmlEscaped());
+    }
+
+    const QString txid = ToQString(tx.find_value("txid"));
+    const QString blockhash = ToQString(tx.find_value("blockhash"));
+
+    // ---- Wallet-aware "Change Address" labeling (modern explorer style) ----
+    // We use getaddressinfo to detect addresses that belong to the *loaded wallet*.
+    // If wallet RPC is unavailable, we gracefully fall back (no change labels).
+    auto IsMineAddr = [&](const QString& addr) -> bool {
+        if (!m_client_model || addr.isEmpty()) return false;
+        try {
+            UniValue p(UniValue::VARR);
+            p.push_back(addr.toStdString());
+            UniValue r = m_client_model->node().executeRpc("getaddressinfo", p, "/");
+            if (!r.isObject()) return false;
+
+            const UniValue& ismine = r.find_value("ismine");
+            if (ismine.isBool() && ismine.get_bool()) return true;
+
+            const UniValue& iswatch = r.find_value("iswatchonly");
+            if (iswatch.isBool() && iswatch.get_bool()) return true;
+        } catch (...) {
+        }
+        return false;
+    };
+
+    struct InLine {
+        QString prev_txid;
+        int vout{-1};
+        QString addr;
+        double amount{0.0};
+        bool ismine{false};
+    };
+    struct OutLine {
+        int n{-1};
+        QString addr;
+        double amount{0.0};
+        bool ismine{false};
+        bool is_change{false};
+    };
+
+    const UniValue& vin = tx.find_value("vin");
+    const bool is_coinbase = vin.isArray() && vin.size() > 0 && vin[0].find_value("coinbase").isStr();
+
+    // Resolve inputs to (address, amount, outpoint)
+    QList<InLine> inputs;
+    double total_in = 0.0;
+    bool any_input_mine = false;
+
+    if (!is_coinbase && vin.isArray() && m_client_model) {
+        for (unsigned int i = 0; i < vin.size(); ++i) {
+            const UniValue& in = vin[i];
+            if (!in.isObject()) continue;
+            if (in.find_value("coinbase").isStr()) continue;
+
+            const QString prev_txid = ToQString(in.find_value("txid"));
+            bool ok = false;
+            const int prev_vout = ToQString(in.find_value("vout")).toInt(&ok);
+            if (prev_txid.isEmpty() || !ok || prev_vout < 0) continue;
+
+            try {
+                UniValue prev_params(UniValue::VARR);
+                prev_params.push_back(prev_txid.toStdString());
+                prev_params.push_back(true);
+                UniValue prev_tx = m_client_model->node().executeRpc("getrawtransaction", prev_params, "/");
+                if (!prev_tx.isObject()) continue;
+
+                const UniValue& prev_vouts = prev_tx.find_value("vout");
+                if (!prev_vouts.isArray()) continue;
+                if ((unsigned int)prev_vout >= prev_vouts.size()) continue;
+
+                const UniValue& prev_out = prev_vouts[prev_vout];
+                const double amt = valueAsDouble(prev_out.find_value("value"));
+
+                QString addr;
+                const UniValue& spk = prev_out.find_value("scriptPubKey");
+                const QStringList addrs = addressesFromScriptPubKey(spk);
+                if (!addrs.isEmpty()) addr = addrs.front();
+
+                InLine line;
+                line.prev_txid = prev_txid;
+                line.vout = prev_vout;
+                line.addr = addr;
+                line.amount = amt;
+                line.ismine = IsMineAddr(addr);
+
+                inputs.push_back(line);
+                total_in += amt;
+                if (line.ismine) any_input_mine = true;
+            } catch (...) {
+                continue;
+            }
+        }
+    }
+
+    // Outputs
+    QList<OutLine> outputs;
+    double total_out = 0.0;
+    bool any_output_mine = false;
+    bool any_output_not_mine = false;
+
+    const UniValue& vout = tx.find_value("vout");
+    if (vout.isArray()) {
+        for (unsigned int i = 0; i < vout.size(); ++i) {
+            const UniValue& outv = vout[i];
+            if (!outv.isObject()) continue;
+
+            OutLine o;
+            o.amount = valueAsDouble(outv.find_value("value"));
+
+            bool okn = false;
+            o.n = ToQString(outv.find_value("n")).toInt(&okn);
+            if (!okn) o.n = (int)i;
+
+            const UniValue& spk = outv.find_value("scriptPubKey");
+            const QStringList addrs = addressesFromScriptPubKey(spk);
+            if (!addrs.isEmpty()) o.addr = addrs.front();
+
+            o.ismine = IsMineAddr(o.addr);
+
+            outputs.push_back(o);
+            total_out += o.amount;
+
+            if (o.ismine) any_output_mine = true;
+            else any_output_not_mine = true;
+        }
+    }
+
+    // Fee (best-effort): only meaningful if we could resolve inputs.
+    double fee = 0.0;
+    if (!is_coinbase && total_in > 0.0) {
+        fee = total_in - total_out;
+        if (fee < 0.0) fee = 0.0; // safety (missing inputs / weirdness)
+    }
+
+    // Change labeling rule (wallet-aware):
+    // If this tx spends coins from our wallet (any_input_mine),
+    // and it has at least one external output and at least one mine output,
+    // then the mine outputs are "Change".
+    const bool looks_like_send = (!is_coinbase && any_input_mine && any_output_mine && any_output_not_mine);
+    if (looks_like_send) {
+        for (auto& o : outputs) {
+            if (o.ismine) o.is_change = true;
+        }
+    } else {
+        for (auto& o : outputs) o.is_change = false;
+    }
+
+    // Helpful text fields
+    const QString conf_text = ToQString(tx.find_value("confirmations"));
+    bool ok_conf = false;
+    const int conf_count = conf_text.toInt(&ok_conf);
+
+    const UniValue& blocktime_val = tx.find_value("blocktime");
+    const UniValue& time_val = tx.find_value("time");
+    const UniValue& best_time_val = blocktime_val.isNull() ? time_val : blocktime_val;
+    const QString time_text = HumanTimeOrRaw(best_time_val);
+
+    // ----- Detailed mode -----
+    if (m_detailedToggle && m_detailedToggle->isChecked()) {
+        QString out;
+        out += "<b>Transaction</b><br>";
+        out += tr("txid: %1<br>").arg(LinkTx(txid, txid));
+        out += tr("hash: %1<br>").arg(SmallMono(ToQString(tx.find_value("hash"))));
+        out += tr("version: %1<br>").arg(H(ToQString(tx.find_value("version"))));
+        out += tr("size: %1<br>").arg(H(ToQString(tx.find_value("size"))));
+        out += tr("vsize: %1<br>").arg(H(ToQString(tx.find_value("vsize"))));
+        out += tr("weight: %1<br>").arg(H(ToQString(tx.find_value("weight"))));
+        out += tr("locktime: %1<br>").arg(H(ToQString(tx.find_value("locktime"))));
+
+        if (!blockhash.isEmpty()) {
+            out += tr("blockhash: %1<br>").arg(LinkBlockHash(blockhash, ShortHash(blockhash)));
+        }
+
+        if (!conf_text.isEmpty()) out += tr("confirmations: %1<br>").arg(H(conf_text));
+        if (!time_text.isEmpty()) out += tr("time: %1<br>").arg(H(time_text));
+
+        // Flow summary (normie obvious)
+        if (is_coinbase) {
+            out += tr("<br><b>Flow</b><br>");
+            out += tr("Type: <b>Coinbase Reward</b><br>");
+        } else if (looks_like_send) {
+            out += tr("<br><b>Flow</b><br>");
+            out += tr("Type: <b>Send</b><br>");
+        } else if (!is_coinbase && any_output_mine && !any_output_not_mine) {
+            out += tr("<br><b>Flow</b><br>");
+            out += tr("Type: <b>Self Transfer</b><br>");
+        } else if (!is_coinbase && !any_input_mine && any_output_mine) {
+            out += tr("<br><b>Flow</b><br>");
+            out += tr("Type: <b>Receive</b><br>");
+        } else {
+            out += tr("<br><b>Flow</b><br>");
+            out += tr("Type: <b>Transfer</b><br>");
+        }
+
+        if (!is_coinbase && total_in > 0.0) {
+            out += tr("Total In: %1<br>").arg(H(FormatAmountFromDouble(total_in)));
+            out += tr("Total Out: %1<br>").arg(H(FormatAmountFromDouble(total_out)));
+            out += tr("Fee: %1<br>").arg(H(FormatAmountFromDouble(fee)));
+        } else {
+            out += tr("Total Out: %1<br>").arg(H(FormatAmountFromDouble(total_out)));
+        }
+
+        // Inputs with outpoints
+        out += "<br><b>Inputs</b><br>";
+        if (is_coinbase) {
+            out += tr("<i>Coinbase (newly minted)</i><br>");
+        } else if (inputs.isEmpty()) {
+            out += tr("<i>Unavailable (could not resolve prevouts)</i><br>");
+        } else {
+            out += "<ul>";
+            for (const auto& inl : inputs) {
+                const QString outpoint = QString("%1:%2").arg(inl.prev_txid, QString::number(inl.vout));
+                QString addr = inl.addr.isEmpty() ? tr("Unknown") : inl.addr;
+
+                QString label = LinkAddr(addr);
+                if (inl.ismine) label += " <b>(mine)</b>";
+
+                out += QString("<li>%1 — %2 — %3</li>")
+                           .arg(label)
+                           .arg(H(FormatAmountFromDouble(inl.amount)))
+                           .arg(SmallMono(H(outpoint)));
+            }
+            out += "</ul>";
+        }
+
+        // Outputs with outpoints + CHANGE label
+        out += "<br><b>Outputs</b><br>";
+        if (outputs.isEmpty()) {
+            out += tr("<i>No outputs</i><br>");
+        } else {
+            out += "<ul>";
+            for (const auto& o : outputs) {
+                const QString outpoint = QString("%1:%2").arg(txid, QString::number(o.n));
+                QString addr = o.addr.isEmpty() ? tr("Unknown") : o.addr;
+
+                QString label = LinkAddr(addr);
+                if (o.is_change) label += " <b>(CHANGE)</b>";
+                else if (o.ismine) label += " <b>(mine)</b>";
+
+                out += QString("<li>%1 — %2 — %3</li>")
+                           .arg(label)
+                           .arg(H(FormatAmountFromDouble(o.amount)))
+                           .arg(SmallMono(H(outpoint)));
+            }
+            out += "</ul>";
+        }
+
+        // Keep original low-level vin/vout dump too (but after the normie flow)
+        out += "<br><b>Raw Inputs (vin)</b><br>";
+        out += "<pre>" + QString::fromStdString(vin.write(2)).toHtmlEscaped() + "</pre>";
+        out += "<br><b>Raw Outputs (vout)</b><br>";
+        out += "<pre>" + QString::fromStdString(vout.write(2)).toHtmlEscaped() + "</pre>";
+
+        return out;
+    }
+
+    // ----- Summary mode (normie obvious) -----
+    QString out;
+    out += "<b>Transaction Summary</b><br>";
+
+    QString type_text = tr("Transfer");
+    if (is_coinbase) type_text = tr("Mining Reward");
+    else if (looks_like_send) type_text = tr("Send (with Change)");
+    else if (!is_coinbase && any_output_mine && !any_output_not_mine) type_text = tr("Self Transfer");
+    else if (!is_coinbase && !any_input_mine && any_output_mine) type_text = tr("Receive");
+    else if (!is_coinbase && outputs.size() > 1) type_text = tr("Transfer (Multiple Outputs)");
+
+    // confirmations / status
+    QString status_text = tr("Pending");
+    if (ok_conf && conf_count > 0) {
+        if (is_coinbase) {
+            if (conf_count >= 101) status_text = tr("Confirmed - Mature");
+            else status_text = tr("Confirmed - Immature (%1 of 100)").arg(conf_count);
+        } else {
+            if (conf_count >= 6) status_text = tr("Confirmed - Fully Confirmed");
+            else status_text = tr("Confirmed - %1 Confirmation%2 (%1 of 6 Recommended)")
+                                  .arg(conf_count)
+                                  .arg(conf_count == 1 ? "" : "s");
+        }
+    }
+
+    out += tr("Type: %1<br>").arg(H(type_text));
+    if (!conf_text.isEmpty()) out += tr("Confirmations: %1<br>").arg(H(conf_text));
+    if (!time_text.isEmpty()) out += tr("Time: %1<br>").arg(H(time_text));
+    out += tr("Status: %1<br>").arg(H(status_text));
+
+    // Flow block, plainly showing inputs -> outputs + UTXO IDs
+    out += "<br><b>Inputs</b><br>";
+    if (is_coinbase) {
+        out += tr("<i>Coinbase (newly minted)</i><br>");
+    } else if (inputs.isEmpty()) {
+        out += tr("<i>Unavailable (could not resolve prevouts)</i><br>");
+    } else {
+        out += "<ul>";
+        for (const auto& inl : inputs) {
+            const QString outpoint = QString("%1:%2").arg(inl.prev_txid, QString::number(inl.vout));
+            QString addr = inl.addr.isEmpty() ? tr("Unknown") : inl.addr;
+
+            QString label = LinkAddr(addr);
+            if (inl.ismine) label += " <b>(mine)</b>";
+
+            out += QString("<li>%1 — %2 — %3</li>")
+                       .arg(label)
+                       .arg(H(FormatAmountFromDouble(inl.amount)))
+                       .arg(SmallMono(H(outpoint)));
+        }
+        out += "</ul>";
+    }
+
+    out += "<b>Outputs</b><br>";
+    if (outputs.isEmpty()) {
+        out += tr("<i>No outputs</i><br>");
+    } else {
+        out += "<ul>";
+        for (const auto& o : outputs) {
+            const QString outpoint = QString("%1:%2").arg(txid, QString::number(o.n));
+            QString addr = o.addr.isEmpty() ? tr("Unknown") : o.addr;
+
+            QString label = LinkAddr(addr);
+            if (o.is_change) label += " <b>(CHANGE)</b>";
+            else if (o.ismine) label += " <b>(mine)</b>";
+
+            out += QString("<li>%1 — %2 — %3</li>")
+                       .arg(label)
+                       .arg(H(FormatAmountFromDouble(o.amount)))
+                       .arg(SmallMono(H(outpoint)));
+        }
+        out += "</ul>";
+    }
+
+    // Totals + Fee (if we could resolve it)
+    out += "<b>Totals</b><br>";
+    if (!is_coinbase && total_in > 0.0) {
+        out += tr("Total In: %1<br>").arg(H(FormatAmountFromDouble(total_in)));
+        out += tr("Total Out: %1<br>").arg(H(FormatAmountFromDouble(total_out)));
+        out += tr("Fee: %1<br>").arg(H(FormatAmountFromDouble(fee)));
+    } else {
+        out += tr("Total Out: %1<br>").arg(H(FormatAmountFromDouble(total_out)));
+    }
+
+    if (!is_coinbase && ok_conf && conf_count > 0 && conf_count < 6) {
+        out += tr("Recommended Safety: %1 of 6 confirmations<br>").arg(conf_count);
+    }
+    if (is_coinbase && ok_conf && conf_count > 0) {
+        if (conf_count >= 101) out += tr("Spendable: Yes<br>");
+        else {
+            out += tr("Spendable: No<br>");
+            out += tr("Matures In: %1 block(s)<br>").arg(101 - conf_count);
+        }
+    }
+
+    out += tr("<br>Transaction ID: %1<br>").arg(LinkTx(txid, txid));
+
+    return out;
+}
+
+QString ExplorerPage::formatAddressForDisplay(const QString& address) const
+{
+    if (!m_client_model || address.isEmpty()) {
+        return tr("Please enter a valid address.");
+    }
+
+    try {
+        UniValue validate_params(UniValue::VARR);
+        validate_params.push_back(address.toStdString());
+        UniValue validate_result = m_client_model->node().executeRpc("validateaddress", validate_params, "/");
+        if (!validate_result.isObject()) return tr("Nothing found.");
+
+        const UniValue& isvalid = validate_result.find_value("isvalid");
+        if (!isvalid.isBool() || !isvalid.get_bool()) {
+            return tr("Nothing found.\n\nThat does not appear to be a valid CapStash address.");
+        }
+
+        UniValue scan_result;
+        bool scan_ok = false;
+        int matching_unspent_count = 0;
+        try {
+            UniValue scan_params(UniValue::VARR);
+            scan_params.push_back("start");
+            UniValue scan_targets(UniValue::VARR);
+            scan_targets.push_back(QString("addr(%1)").arg(address).toStdString());
+            scan_params.push_back(scan_targets);
+            scan_result = m_client_model->node().executeRpc("scantxoutset", scan_params, "/");
+            scan_ok = scan_result.isObject();
+
+            if (scan_ok) {
+                const UniValue& unspents = scan_result.find_value("unspents");
+                if (unspents.isArray()) {
+                    matching_unspent_count = static_cast<int>(unspents.size());
+                }
+            }
+        } catch (...) {
+            scan_ok = false;
+        }
+
+        double total_received = 0.0;
+        double total_sent = 0.0;
+        int receive_count = 0;
+        int send_count = 0;
+
+        // Full activity (NEWEST first). NOTE: This can be very large.
+        QStringList recent_activity;
+        QSet<QString> receive_txids;
+        QSet<QString> send_txids;
+
+        const int tip = rpcGetBlockCount();
+        if (tip >= 0) {
+            // Iterate newest -> oldest to avoid any reverse pass later.
+            for (int h = tip; h >= 0; --h) {
+                QString block_hash;
+                try {
+                    block_hash = rpcGetBlockHash(h);
+                } catch (...) {
+                    continue;
+                }
+                if (block_hash.isEmpty()) continue;
+
+                UniValue block_params(UniValue::VARR);
+                block_params.push_back(block_hash.toStdString());
+                block_params.push_back(2);
+
+                UniValue block;
+                try {
+                    block = m_client_model->node().executeRpc("getblock", block_params, "/");
+                } catch (...) {
+                    continue;
+                }
+                if (!block.isObject()) continue;
+
+                const QString block_time = HumanTimeOrRaw(block.find_value("time"));
+                const UniValue& txs = block.find_value("tx");
+                if (!txs.isArray()) continue;
+
+                for (unsigned int i = 0; i < txs.size(); ++i) {
+                    const UniValue& tx = txs[i];
+                    if (!tx.isObject()) continue;
+
+                    const QString txid = ToQString(tx.find_value("txid"));
+                    if (txid.isEmpty()) continue;
+
+                    // Per-transaction classification for THIS address
+                    double recv_amt = 0.0;
+                    double sent_amt = 0.0;
+
+                    const UniValue& vin = tx.find_value("vin");
+                    const bool is_coinbase =
+                        vin.isArray() && vin.size() > 0 && vin[0].find_value("coinbase").isStr();
+
+                    // Outputs: received
+                    const UniValue& vout = tx.find_value("vout");
+                    if (vout.isArray()) {
+                        for (unsigned int j = 0; j < vout.size(); ++j) {
+                            const UniValue& outv = vout[j];
+                            const QStringList addrs = addressesFromScriptPubKey(outv.find_value("scriptPubKey"));
+                            if (addrs.contains(address)) {
+                                const double amt = valueAsDouble(outv.find_value("value"));
+                                recv_amt += amt;
+                            }
+                        }
+                    }
+
+                    // Inputs: sent (requires resolving prevouts)
+                    if (vin.isArray()) {
+                        for (unsigned int j = 0; j < vin.size(); ++j) {
+                            const UniValue& in = vin[j];
+                            if (in.find_value("coinbase").isStr()) continue;
+
+                            const QString prev_txid = ToQString(in.find_value("txid"));
+                            const QString prev_vout_text = ToQString(in.find_value("vout"));
+                            bool ok = false;
+                            const int prev_vout = prev_vout_text.toInt(&ok);
+                            if (prev_txid.isEmpty() || !ok || prev_vout < 0) continue;
+
+                            UniValue prev_params(UniValue::VARR);
+                            prev_params.push_back(prev_txid.toStdString());
+                            prev_params.push_back(true);
+
+                            UniValue prev_tx;
+                            try {
+                                prev_tx = m_client_model->node().executeRpc("getrawtransaction", prev_params, "/");
+                            } catch (...) {
+                                continue;
+                            }
+                            if (!prev_tx.isObject()) continue;
+
+                            const UniValue& prev_outs = prev_tx.find_value("vout");
+                            if (!prev_outs.isArray()) continue;
+                            if ((unsigned int)prev_vout >= prev_outs.size()) continue;
+
+                            const UniValue& prev_out = prev_outs[prev_vout];
+                            const QStringList prev_addrs = addressesFromScriptPubKey(prev_out.find_value("scriptPubKey"));
+                            if (prev_addrs.contains(address)) {
+                                const double amt = valueAsDouble(prev_out.find_value("value"));
+                                sent_amt += amt;
+                            }
+                        }
+                    }
+
+                    const bool tx_received_match = recv_amt > 0.0;
+                    const bool tx_sent_match = sent_amt > 0.0;
+
+                    if (tx_received_match) receive_txids.insert(txid);
+                    if (tx_sent_match) send_txids.insert(txid);
+
+                    if (!tx_received_match && !tx_sent_match) continue;
+
+                    total_received += recv_amt;
+                    total_sent += sent_amt;
+
+                    // Classify
+                    QString type;
+                    if (is_coinbase && tx_received_match) {
+                        type = "Coinbase";
+                    } else if (tx_received_match && tx_sent_match) {
+                        type = "Self";
+                    } else if (tx_received_match) {
+                        type = "Receive";
+                    } else if (tx_sent_match) {
+                        type = "Send";
+                    } else {
+                        type = "Unknown";
+                    }
+
+                    const double delta = recv_amt - sent_amt;
+                    const QString delta_sign = (delta >= 0.0) ? "+" : "-";
+                    const QString delta_amt = FormatAmountFromDouble(std::abs(delta));
+
+                    // Clickable block height + txid
+                    const QString line = QString("[%1] %2%3 — %4 — block %5 — %6")
+                        .arg(H(type))
+                        .arg(delta_sign)
+                        .arg(H(delta_amt))
+                        .arg(H(block_time))
+                        .arg(LinkBlockHeight(h, QString::number(h)))
+                        .arg(LinkTx(txid, txid.left(16) + "…"));
+
+                    // Keep ALL history (no truncation)
+                    PushRecent(recent_activity, line, -1);
+                }
+            }
+        }
+
+        receive_count = receive_txids.size();
+        send_count = send_txids.size();
+
+        if (m_detailedToggle && m_detailedToggle->isChecked()) {
+            // Keep detailed mode as pretty-printed JSON, but still clickable at top
+            QString out;
+            out += "<b>Address</b><br>";
+            out += tr("Address: %1<br><br>").arg(LinkAddr(address));
+            out += "<pre>" + QString::fromStdString(validate_result.write(2)).toHtmlEscaped() + "</pre>";
+            if (scan_ok) {
+                out += tr("<br><b>UTXO Scan</b><br>");
+                out += "<pre>" + QString::fromStdString(scan_result.write(2)).toHtmlEscaped() + "</pre>";
+            }
+            out += tr("<br><b>History Summary</b><br>");
+            out += tr("total_received: %1<br>").arg(H(FormatAmountFromDouble(total_received)));
+            out += tr("total_sent: %1<br>").arg(H(FormatAmountFromDouble(total_sent)));
+            out += tr("receive_transactions: %1<br>").arg(receive_count);
+            out += tr("spend_transactions: %1<br>").arg(send_count);
+            out += tr("matching_unspent_outputs: %1<br>").arg(matching_unspent_count);
+
+            if (!recent_activity.isEmpty()) {
+                out += tr("<br><b>Activity</b><br>");
+                out += "<ul>";
+                // Already newest-first
+                for (int i = 0; i < recent_activity.size(); ++i) {
+                    out += QString("<li>%1</li>").arg(recent_activity[i]);
+                }
+                out += "</ul>";
+            }
+            return out;
+        }
+
+        QString out;
+        out += "<b>Address Summary</b><br>";
+        out += tr("Address: %1<br>").arg(LinkAddr(address));
+        out += tr("Valid: Yes<br>");
+
+        const UniValue& isscript = validate_result.find_value("isscript");
+        if (!isscript.isNull()) {
+            out += tr("Script Address: %1<br>").arg(ToQString(isscript) == "true" ? tr("Yes") : tr("No"));
+        }
+
+        const UniValue& iswitness = validate_result.find_value("iswitness");
+        if (!iswitness.isNull()) {
+            out += tr("Witness Address: %1<br>").arg(ToQString(iswitness) == "true" ? tr("Yes") : tr("No"));
+        }
+
+        const UniValue& script_pub_key = validate_result.find_value("scriptPubKey");
+        const QString spk_hex = ToQString(script_pub_key);
+        if (!spk_hex.isEmpty()) {
+            const QStringList decoded = rpcDecodeScriptAddresses(spk_hex);
+            if (!decoded.isEmpty()) {
+                QStringList linked;
+                for (const QString& a : decoded) linked.push_back(LinkAddr(a));
+                out += tr("Decoded As: %1<br>").arg(linked.join(", "));
+            }
+        }
+
+        if (scan_ok) {
+            const QString total_amount = ToQString(scan_result.find_value("total_amount"));
+            const QString best_height = ToQString(scan_result.find_value("height"));
+
+            if (!total_amount.isEmpty()) {
+                out += tr("Current Balance: %1 CAP<br>").arg(H(total_amount));
+            }
+            out += tr("Unspent Outputs: %1<br>").arg(matching_unspent_count);
+            if (!best_height.isEmpty()) {
+                out += tr("Scanned At Height: %1<br>").arg(H(best_height));
+            }
+        } else {
+            out += tr("Current Balance: Unavailable<br>");
+            out += tr("Unspent Outputs: Unavailable<br>");
+        }
+
+        out += tr("Total Received: %1<br>").arg(H(FormatAmountFromDouble(total_received)));
+        out += tr("Total Sent: %1<br>").arg(H(FormatAmountFromDouble(total_sent)));
+        out += tr("Net Flow: %1<br>").arg(H(FormatAmountFromDouble(total_received - total_sent)));
+        out += tr("Receive Transactions: %1<br>").arg(receive_count);
+        out += tr("Spend Transactions: %1<br>").arg(send_count);
+
+        if (!recent_activity.isEmpty()) {
+            out += tr("<br><b>Activity</b><br>");
+            out += "<ul>";
+            // Already newest-first
+            for (int i = 0; i < recent_activity.size(); ++i) {
+                out += QString("<li>%1</li>").arg(recent_activity[i]);
+            }
+            out += "</ul>";
+        } else {
+            out += tr("<br><b>Activity</b><br><ul><li>No activity found.</li></ul>");
+        }
+
+        return out;
+    } catch (...) {
+        return tr("Nothing found.");
+    }
+}
+
+void ExplorerPage::loadBlockRow(int height)
+{
+    const QString hash = rpcGetBlockHash(height);
+    if (hash.isEmpty()) return;
+
+    QString label = tr("#%1").arg(height);
+    try {
+        UniValue params(UniValue::VARR);
+        params.push_back(hash.toStdString());
+        params.push_back(2);
+        UniValue block = m_client_model->node().executeRpc("getblock", params, "/");
+        if (block.isObject()) {
+            label = makeBlockListLabel(height, block);
+
+            // --- NEW: network graph block marker at the *block timestamp* ---
+            const UniValue& t = block.find_value("time");
+            bool ok = false;
+            const int64_t ts = ToQString(t).toLongLong(&ok);
+            if (ok && ts > 0 && m_networkStatsGraph) {
+                m_networkStatsGraph->addBlockMarker(ts);
+            }
+        }
+    } catch (...) {
+        label = tr("#%1").arg(height);
+    }
+
+    auto* item = new QListWidgetItem(label, m_blockList);
+    item->setData(Qt::UserRole, height);
+    item->setData(Qt::UserRole + 1, hash);
+    item->setToolTip(hash);
+}
+
+void ExplorerPage::loadInitialBlocks()
+{
+    m_blockList->clear();
+    m_txList->clear();
+    if (m_detailView) m_detailView->setText(QString());
+    m_cachedTxJson.clear();
+    m_currentBlockHash.clear();
+    m_currentBlockJson.clear();
+    m_lastViewKind.clear();
+    m_lastViewValue.clear();
+
+    const int tip = rpcGetBlockCount();
+    if (tip < 0) {
+        m_statusLabel->setText(tr("Explorer unavailable"));
+        return;
+    }
+
+    m_knownTipHeight = tip;
+
+    const int start = std::max(0, tip - 59);
+    for (int h = tip; h >= start; --h) {
+        loadBlockRow(h);
+    }
+
+    m_loadedOldestHeight = start;
+    m_statusLabel->setText(tr("Tip: %1").arg(tip));
+}
+
+void ExplorerPage::appendOlderBlocks(int count)
+{
+    if (m_loadingMore || m_loadedOldestHeight <= 0) return;
+    m_loadingMore = true;
+
+    const int next_end = std::max(0, m_loadedOldestHeight - count);
+    for (int h = m_loadedOldestHeight - 1; h >= next_end; --h) {
+        loadBlockRow(h);
+    }
+
+    m_loadedOldestHeight = next_end;
+    m_loadingMore = false;
+}
+
+void ExplorerPage::prependNewBlocks(int new_tip_height)
+{
+    for (int h = m_knownTipHeight + 1; h <= new_tip_height; ++h) {
+        const QString hash = rpcGetBlockHash(h);
+        if (hash.isEmpty()) continue;
+
+        QString label = tr("#%1").arg(h);
+        try {
+            UniValue params(UniValue::VARR);
+            params.push_back(hash.toStdString());
+            params.push_back(2);
+            UniValue block = m_client_model->node().executeRpc("getblock", params, "/");
+            if (block.isObject()) {
+                label = makeBlockListLabel(h, block);
+
+                // --- NEW: network graph block marker at the *block timestamp* ---
+                const UniValue& t = block.find_value("time");
+                bool ok = false;
+                const int64_t ts = ToQString(t).toLongLong(&ok);
+                if (ok && ts > 0 && m_networkStatsGraph) {
+                    m_networkStatsGraph->addBlockMarker(ts);
+                }
+            }
+        } catch (...) {
+        }
+
+        auto* item = new QListWidgetItem(label);
+        item->setData(Qt::UserRole, h);
+        item->setData(Qt::UserRole + 1, hash);
+        item->setToolTip(hash);
+        m_blockList->insertItem(0, item);
+    }
+
+    m_knownTipHeight = new_tip_height;
+    m_statusLabel->setText(tr("Tip: %1").arg(new_tip_height));
+}
+
+void ExplorerPage::refreshTip()
+{
+    refreshNetworkStats();
+    const int tip = rpcGetBlockCount();
+    if (tip < 0) return;
+
+    if (m_knownTipHeight < 0) {
+        loadInitialBlocks();
+        return;
+    }
+
+    if (tip > m_knownTipHeight) {
+        prependNewBlocks(tip);
+    } else {
+        m_statusLabel->setText(tr("Tip: %1").arg(tip));
+    }
+}
+
+void ExplorerPage::refreshCurrentView()
+{
+    if (m_lastViewKind == "block" && !m_currentBlockJson.isEmpty()) {
+        UniValue block;
+        if (ParseJson(m_currentBlockJson, block)) {
+            m_detailView->setText(formatBlockForDisplay(block));
+        }
+        return;
+    }
+
+    if (m_lastViewKind == "tx" && m_cachedTxJson.contains(m_lastViewValue)) {
+        UniValue tx;
+        if (ParseJson(m_cachedTxJson.value(m_lastViewValue), tx)) {
+            m_detailView->setText(formatTxForDisplay(tx));
+        }
+        return;
+    }
+
+    if (m_lastViewKind == "address") {
+        m_detailView->setText(formatAddressForDisplay(m_lastViewValue));
+    }
+}
+
+bool ExplorerPage::showBlockByHeight(int height)
+{
+    const QString hash = rpcGetBlockHash(height);
+    if (hash.isEmpty()) {
+        m_detailView->setText(tr("Nothing found.<br><br>That block height does not exist."));
+        return false;
+    }
+    return showBlockByHash(hash);
+}
+
+bool ExplorerPage::showBlockByHash(const QString& block_hash)
+{
+    m_txList->clear();
+    m_cachedTxJson.clear();
+    m_currentBlockHash.clear();
+    m_currentBlockJson.clear();
+
+    if (!m_client_model) return false;
+
+    try {
+        UniValue params(UniValue::VARR);
+        params.push_back(block_hash.toStdString());
+        params.push_back(2);
+
+        UniValue result = m_client_model->node().executeRpc("getblock", params, "/");
+        if (!result.isObject()) {
+            m_detailView->setText(tr("Nothing found.<br><br>That block could not be loaded."));
+            return false;
+        }
+
+        m_currentBlockHash = block_hash;
+        m_currentBlockJson = QString::fromStdString(result.write());
+        m_lastViewKind = QStringLiteral("block");
+        m_lastViewValue = block_hash;
+        m_detailView->setText(formatBlockForDisplay(result));
+
+        const UniValue& block_conf = result.find_value("confirmations");
+        const UniValue& block_time = result.find_value("time");
+
+        const UniValue& txs = result.find_value("tx");
+        if (txs.isArray()) {
+            for (unsigned int i = 0; i < txs.size(); ++i) {
+                const UniValue& tx = txs[i];
+                QString txid;
+                QString label = tr("Transaction");
+
+                if (tx.isObject()) {
+                    UniValue tx_copy = tx;
+
+                    if (tx_copy.find_value("confirmations").isNull() && !block_conf.isNull()) {
+                        tx_copy.pushKV("confirmations", block_conf);
+                    }
+                    if (tx_copy.find_value("blocktime").isNull() && !block_time.isNull()) {
+                        tx_copy.pushKV("blocktime", block_time);
+                    }
+                    if (tx_copy.find_value("blockhash").isNull()) {
+                        tx_copy.pushKV("blockhash", block_hash.toStdString());
+                    }
+
+                    const UniValue& txid_val = tx_copy.find_value("txid");
+                    if (txid_val.isStr()) {
+                        txid = QString::fromStdString(txid_val.get_str());
+                    }
+
+                    if (!txid.isEmpty()) {
+                        m_cachedTxJson.insert(txid, QString::fromStdString(tx_copy.write()));
+                    }
+                    label = makeTxListLabel(tx_copy);
+                } else if (tx.isStr()) {
+                    txid = QString::fromStdString(tx.get_str());
+                }
+
+                if (!txid.isEmpty()) {
+                    auto* item = new QListWidgetItem(label, m_txList);
+                    item->setData(Qt::UserRole, txid);
+                    item->setToolTip(txid);
+                }
+            }
+        }
+        return true;
+    } catch (...) {
+        m_detailView->setText(tr("Nothing found.<br><br>That block could not be loaded."));
+        return false;
+    }
+}
+
+bool ExplorerPage::showTransaction(const QString& txid)
+{
+    if (m_cachedTxJson.contains(txid)) {
+        UniValue tx;
+        if (ParseJson(m_cachedTxJson.value(txid), tx)) {
+            m_lastViewKind = QStringLiteral("tx");
+            m_lastViewValue = txid;
+            m_detailView->setText(formatTxForDisplay(tx));
+            return true;
+        }
+    }
+
+    if (!m_client_model) return false;
+
+    try {
+        UniValue params(UniValue::VARR);
+        params.push_back(txid.toStdString());
+        params.push_back(true);
+        if (!m_currentBlockHash.isEmpty()) {
+            params.push_back(m_currentBlockHash.toStdString());
+        }
+
+        UniValue result = m_client_model->node().executeRpc("getrawtransaction", params, "/");
+        if (result.isObject()) {
+            m_cachedTxJson.insert(txid, QString::fromStdString(result.write()));
+            m_lastViewKind = QStringLiteral("tx");
+            m_lastViewValue = txid;
+            m_detailView->setText(formatTxForDisplay(result));
+        } else {
+            m_detailView->setText(QString("<pre>%1</pre>").arg(QString::fromStdString(result.write(2)).toHtmlEscaped()));
+        }
+        return true;
+    } catch (...) {
+        m_detailView->setText(tr("Nothing found.<br><br>That transaction could not be loaded."));
+        return false;
+    }
+}
+
+void ExplorerPage::showAddress(const QString& address)
+{
+    m_txList->clear();
+    m_cachedTxJson.clear();
+    m_currentBlockHash.clear();
+    m_currentBlockJson.clear();
+    m_lastViewKind = QStringLiteral("address");
+    m_lastViewValue = address;
+    m_detailView->setText(formatAddressForDisplay(address));
+}
+
+void ExplorerPage::onSearchClicked()
+{
+    const QString q = m_searchEdit->text().trimmed();
+    if (q.isEmpty()) return;
+
+    m_searchEdit->clear();
+
+    bool ok = false;
+    const int height = q.toInt(&ok);
+    if (ok && q == QString::number(height) && height >= 0) {
+        if (showBlockByHeight(height)) return;
+    }
+
+    if (LooksLikeHex64(q)) {
+        if (showBlockByHash(q)) return;
+        if (showTransaction(q)) return;
+    }
+
+    showAddress(q);
+}
+
+void ExplorerPage::onSearchReturnPressed()
+{
+    onSearchClicked();
+}
+
+void ExplorerPage::onBlockItemClicked(QListWidgetItem* item)
+{
+    if (!item) return;
+    showBlockByHash(item->data(Qt::UserRole + 1).toString());
+}
+
+void ExplorerPage::onTxItemClicked(QListWidgetItem* item)
+{
+    if (!item) return;
+    showTransaction(item->data(Qt::UserRole).toString());
+}
+
+void ExplorerPage::onBlockListScrollChanged(int value)
+{
+    if (!m_blockList) return;
+
+    QScrollBar* sb = m_blockList->verticalScrollBar();
+    if (!sb) return;
+
+    if (value >= sb->maximum() - 2) {
+        appendOlderBlocks(60);
+    }
+}
+
+void ExplorerPage::onDetailedToggled(bool)
+{
+    refreshCurrentView();
+}
+
+// --- Click routing for QLabel linkActivated(...) ---
+void ExplorerPage::onDetailLinkClicked(const QString& link)
+{
+    const QString s = link;
+
+    if (s.startsWith("cap:tx:")) {
+        showTransaction(s.mid(QString("cap:tx:").size()));
+        return;
+    }
+    if (s.startsWith("cap:block:")) {
+        showBlockByHash(s.mid(QString("cap:block:").size()));
+        return;
+    }
+    if (s.startsWith("cap:blockheight:")) {
+        bool ok = false;
+        const int h = s.mid(QString("cap:blockheight:").size()).toInt(&ok);
+        if (ok) showBlockByHeight(h);
+        return;
+    }
+    if (s.startsWith("cap:addr:")) {
+        showAddress(s.mid(QString("cap:addr:").size()));
+        return;
+    }
+}
