@@ -434,7 +434,7 @@ unsigned int GetNextWorkRequired(const CBlockIndex* pindexLast,
 
     const int64_t next_height = pindexLast->nHeight + 1;
 
-    // Post-36000 lottery era and post-36300 final lottery era both derive
+    // Post-55000 lottery era and post-55100 final lottery era both derive
     // lottery eligibility from prior confirmed chain state only.
     if (LotteryConsensusActive(params, next_height)) {
         if (IsConsensusLotteryHeight(pindexLast, params, next_height)) {
