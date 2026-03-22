@@ -939,6 +939,33 @@ int MinerPage::getLocalBlocksMined() const
     return 0;
 }
 
+static bool QueryLatestLotteryWinner(interfaces::Node& node,
+                                     int tip_height,
+                                     QString& winner_text,
+                                     int& winner_height,
+                                     int max_lookback = 256)
+{
+    winner_text.clear();
+    winner_height = -1;
+
+    if (tip_height < 0) return false;
+
+    const int min_height = std::max(0, tip_height - max_lookback + 1);
+
+    for (int h = tip_height; h >= min_height; --h) {
+        QString candidate_text;
+        int candidate_height = -1;
+
+        if (QueryRecentLotteryWinner(node, h, 0, candidate_text, candidate_height)) {
+            winner_text = candidate_text;
+            winner_height = candidate_height;
+            return true;
+        }
+    }
+
+    return false;
+}
+
 void MinerPage::updateMiningStats()
 {
     double local_hashps = 0.0;
@@ -1064,10 +1091,9 @@ void MinerPage::updateMiningStats()
             }
 
             {
-                const qint64 now_secs = QDateTime::currentSecsSinceEpoch();
-                if (gui_tip_time > 0 && (now_secs - gui_tip_time) <= 60 && gui_tip_height >= 0) {
+                if (gui_tip_height >= 0) {
                     show_recent_lottery_winner =
-                        QueryRecentLotteryWinner(node, gui_tip_height, gui_tip_time,
+                        QueryLatestLotteryWinner(node, gui_tip_height,
                                                  recent_lottery_winner, recent_lottery_height);
                 }
             }
@@ -1119,30 +1145,25 @@ void MinerPage::updateMiningStats()
     }
 
     const qint64 now_secs = QDateTime::currentSecsSinceEpoch();
-    const bool have_tip_time = (gui_tip_time > 0);
-    const qint64 secs_since_network_block =
-        have_tip_time ? std::max<qint64>(0, now_secs - gui_tip_time) : 0;
-
     const bool have_tip_height = (gui_tip_height >= 0 || network_block_count >= 0);
+
     const bool show_lottery_block_incoming =
         mining &&
         template_diff_one &&
-        have_tip_time &&
-        have_tip_height &&
-        secs_since_network_block >= 120;
+        have_tip_height;
 
     if (m_lotteryBlockLabel) {
-        if (show_recent_lottery_winner) {
+        if (show_lottery_block_incoming) {
+            const bool blink_on = ((now_secs & 1) == 0);
+            m_lotteryBlockLabel->setText(QObject::tr("Lottery Block Activated!"));
+            m_lotteryBlockLabel->setStyleSheet(
+                blink_on ? LotteryOnStyle() : LotteryArmedDimStyle());
+        } else if (show_recent_lottery_winner) {
             m_lotteryBlockLabel->setText(
                 QObject::tr("Last Lottery Block Found By: %1  |  #%2")
                     .arg(recent_lottery_winner)
                     .arg(recent_lottery_height));
             m_lotteryBlockLabel->setStyleSheet(LotteryOnStyle());
-        } else if (show_lottery_block_incoming) {
-            const bool blink_on = ((now_secs & 1) == 0);
-            m_lotteryBlockLabel->setText(QObject::tr("Lottery Block Activated!"));
-            m_lotteryBlockLabel->setStyleSheet(
-                blink_on ? LotteryOnStyle() : LotteryArmedDimStyle());
         } else {
             m_lotteryBlockLabel->setText(QObject::tr("Lottery Block Deactivated."));
             m_lotteryBlockLabel->setStyleSheet(LotteryDeactivatedStyle());
@@ -1157,7 +1178,12 @@ void MinerPage::updateMiningStats()
         m_lastLocalBlockHash.clear();
 
         if (m_lotteryBlockLabel) {
-            if (show_recent_lottery_winner) {
+            if (show_lottery_block_incoming) {
+                const bool blink_on = ((now_secs & 1) == 0);
+                m_lotteryBlockLabel->setText(QObject::tr("Lottery Block Activated!"));
+                m_lotteryBlockLabel->setStyleSheet(
+                    blink_on ? LotteryOnStyle() : LotteryArmedDimStyle());
+            } else if (show_recent_lottery_winner) {
                 m_lotteryBlockLabel->setText(
                     QObject::tr("Last Lottery Block Found By: %1  |  #%2")
                         .arg(recent_lottery_winner)
