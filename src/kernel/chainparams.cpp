@@ -109,6 +109,9 @@ public:
         consensus.nPowTargetTimespan = 600; // Per Block Adjustment over a 10 block rolling window.
         consensus.nMinDiffRescueHeight = 100;
         consensus.nMinDiffQuarantineHeight = 150;
+        consensus.nLotteryConsensusHeight = 55000;
+        consensus.nLotteryFinalConsensusHeight = 55100;
+        consensus.nLotteryModulo = 20;
         consensus.fPowAllowMinDifficultyBlocks = true;
         consensus.fPowNoRetargeting = false;
         consensus.nRuleChangeActivationThreshold = 10080; // ~7 Days
