@@ -7,7 +7,9 @@
 
 #include <arith_uint256.h>
 #include <chain.h>
+#include <hash.h>
 #include <primitives/block.h>
+#include <serialize.h>
 #include <uint256.h>
 
 #include <assert.h>
@@ -20,6 +22,8 @@
 //
 //   consensus.nMinDiffRescueHeight
 //   consensus.nMinDiffQuarantineHeight
+//   consensus.nLotteryConsensusHeight
+//   consensus.nLotteryFinalConsensusHeight
 //
 static inline bool MinDiffRescueActive(const Consensus::Params& params, int64_t height)
 {
@@ -33,15 +37,27 @@ static inline bool MinDiffQuarantineActive(const Consensus::Params& params, int6
            height >= params.nMinDiffQuarantineHeight;
 }
 
+static inline bool LotteryConsensusActive(const Consensus::Params& params, int64_t height)
+{
+    return params.fPowAllowMinDifficultyBlocks &&
+           height >= params.nLotteryConsensusHeight;
+}
+
+static inline bool LotteryFinalConsensusActive(const Consensus::Params& params, int64_t height)
+{
+    return params.fPowAllowMinDifficultyBlocks &&
+           height >= params.nLotteryFinalConsensusHeight;
+}
+
 // -----------------------------------------------------------------------------
-// DGW / rescue tuning
+// DGW / lottery tuning
 // -----------------------------------------------------------------------------
 
 // 24 blocks @ 60s target = ~24 minutes of history.
 static constexpr int64_t nPastBlocks = 24;
 
 // -----------------------------------------------------------------------------
-// Rescue block helpers
+// Helpers
 // -----------------------------------------------------------------------------
 
 static inline uint32_t PowLimitBits(const Consensus::Params& params)
@@ -49,10 +65,45 @@ static inline uint32_t PowLimitBits(const Consensus::Params& params)
     return UintToArith256(params.powLimit).GetCompact();
 }
 
-static inline bool IsRescueMinDifficultyBlock(const CBlockIndex* pindex,
-                                              const Consensus::Params& params)
+static uint64_t ReadLE64FromUint256(const uint256& v)
+{
+    const unsigned char* p = v.begin();
+    return ((uint64_t)p[0]) |
+           ((uint64_t)p[1] << 8) |
+           ((uint64_t)p[2] << 16) |
+           ((uint64_t)p[3] << 24) |
+           ((uint64_t)p[4] << 32) |
+           ((uint64_t)p[5] << 40) |
+           ((uint64_t)p[6] << 48) |
+           ((uint64_t)p[7] << 56);
+}
+
+static inline int64_t BlockTimeForDGW(const CBlockIndex* pindex,
+                                      const Consensus::Params& params,
+                                      int64_t next_height)
+{
+    // Final fork: use MTP to harden difficulty against raw timestamp games.
+    if (LotteryFinalConsensusActive(params, next_height)) {
+        return pindex->GetMedianTimePast();
+    }
+
+    // Earlier eras: preserve legacy/raw-time behavior for compatibility.
+    return pindex->GetBlockTime();
+}
+
+// -----------------------------------------------------------------------------
+// Legacy rescue block helpers (pre-first-fork behavior)
+// -----------------------------------------------------------------------------
+
+static inline bool IsLegacyRescueMinDifficultyBlock(const CBlockIndex* pindex,
+                                                    const Consensus::Params& params)
 {
     if (pindex == nullptr || pindex->pprev == nullptr) {
+        return false;
+    }
+
+    // Legacy rescue classification only applies before the lottery-consensus HF.
+    if (LotteryConsensusActive(params, pindex->nHeight)) {
         return false;
     }
 
@@ -66,10 +117,166 @@ static inline bool IsRescueMinDifficultyBlock(const CBlockIndex* pindex,
         return false;
     }
 
-    // Rescue rule: more than 2x target spacing late.
+    // Legacy rescue rule: more than 2x target spacing late.
     return pindex->GetBlockTime() >
            pindex->pprev->GetBlockTime() + (params.nPowTargetSpacing * 2);
 }
+
+// -----------------------------------------------------------------------------
+// Consensus lottery helpers
+// -----------------------------------------------------------------------------
+//
+// Era 1 (>= nLotteryConsensusHeight, < nLotteryFinalConsensusHeight):
+//   - lottery selected from prior chain state using v1 domain separator
+//   - consecutive lottery blocks allowed
+//
+// Era 2 (>= nLotteryFinalConsensusHeight):
+//   - lottery selected from prior chain state using v2 domain separator
+//   - consecutive lottery blocks NOT allowed
+//   - DGW uses MTP
+//
+
+static inline bool IsConsensusLotteryBlockV1(const CBlockIndex* pindex,
+                                             const Consensus::Params& params);
+
+static inline bool IsConsensusLotteryHeightV1(const CBlockIndex* pindexLast,
+                                              const Consensus::Params& params,
+                                              int64_t next_height)
+{
+    if (pindexLast == nullptr) {
+        return false;
+    }
+
+    if (!LotteryConsensusActive(params, next_height) ||
+        LotteryFinalConsensusActive(params, next_height)) {
+        return false;
+    }
+
+    if (params.nLotteryModulo <= 0) {
+        return false;
+    }
+
+    HashWriter ss{};
+    ss << pindexLast->GetBlockHash();
+    ss << next_height;
+
+    if (pindexLast->pprev != nullptr) {
+        ss << pindexLast->pprev->GetBlockHash();
+    } else {
+        ss << uint256();
+    }
+
+    ss << std::string("CapStash-Lottery-v1");
+
+    const uint256 seed = ss.GetHash();
+    const uint64_t r = ReadLE64FromUint256(seed);
+
+    return (r % static_cast<uint64_t>(params.nLotteryModulo)) == 0;
+}
+
+static inline bool IsConsensusLotteryBlockV1(const CBlockIndex* pindex,
+                                             const Consensus::Params& params)
+{
+    if (pindex == nullptr || pindex->pprev == nullptr) {
+        return false;
+    }
+
+    if (!LotteryConsensusActive(params, pindex->nHeight) ||
+        LotteryFinalConsensusActive(params, pindex->nHeight)) {
+        return false;
+    }
+
+    if (pindex->nBits != PowLimitBits(params)) {
+        return false;
+    }
+
+    return IsConsensusLotteryHeightV1(pindex->pprev, params, pindex->nHeight);
+}
+
+static inline bool IsConsensusLotteryBlockV2(const CBlockIndex* pindex,
+                                             const Consensus::Params& params);
+
+static inline bool IsConsensusLotteryHeightV2(const CBlockIndex* pindexLast,
+                                              const Consensus::Params& params,
+                                              int64_t next_height)
+{
+    if (pindexLast == nullptr) {
+        return false;
+    }
+
+    if (!LotteryFinalConsensusActive(params, next_height)) {
+        return false;
+    }
+
+    if (params.nLotteryModulo <= 0) {
+        return false;
+    }
+
+    // Final-era hardening: never allow consecutive lottery blocks.
+    if (IsConsensusLotteryBlockV2(pindexLast, params)) {
+        return false;
+    }
+
+    HashWriter ss{};
+    ss << pindexLast->GetBlockHash();
+    ss << next_height;
+
+    if (pindexLast->pprev != nullptr) {
+        ss << pindexLast->pprev->GetBlockHash();
+    } else {
+        ss << uint256();
+    }
+
+    ss << std::string("CapStash-Lottery-v2");
+
+    const uint256 seed = ss.GetHash();
+    const uint64_t r = ReadLE64FromUint256(seed);
+
+    return (r % static_cast<uint64_t>(params.nLotteryModulo)) == 0;
+}
+
+static inline bool IsConsensusLotteryBlockV2(const CBlockIndex* pindex,
+                                             const Consensus::Params& params)
+{
+    if (pindex == nullptr || pindex->pprev == nullptr) {
+        return false;
+    }
+
+    if (!LotteryFinalConsensusActive(params, pindex->nHeight)) {
+        return false;
+    }
+
+    if (pindex->nBits != PowLimitBits(params)) {
+        return false;
+    }
+
+    return IsConsensusLotteryHeightV2(pindex->pprev, params, pindex->nHeight);
+}
+
+static inline bool IsConsensusLotteryHeight(const CBlockIndex* pindexLast,
+                                            const Consensus::Params& params,
+                                            int64_t next_height)
+{
+    if (LotteryFinalConsensusActive(params, next_height)) {
+        return IsConsensusLotteryHeightV2(pindexLast, params, next_height);
+    }
+
+    return IsConsensusLotteryHeightV1(pindexLast, params, next_height);
+}
+
+static inline bool IsConsensusLotteryBlock(const CBlockIndex* pindex,
+                                           const Consensus::Params& params)
+{
+    if (LotteryFinalConsensusActive(params, pindex ? pindex->nHeight : 0)) {
+        return IsConsensusLotteryBlockV2(pindex, params);
+    }
+
+    return IsConsensusLotteryBlockV1(pindex, params);
+}
+
+// -----------------------------------------------------------------------------
+// DGW sample eligibility
+// -----------------------------------------------------------------------------
 
 static inline bool IsEligibleDGWBlock(const CBlockIndex* pindex,
                                       const Consensus::Params& params,
@@ -84,18 +291,17 @@ static inline bool IsEligibleDGWBlock(const CBlockIndex* pindex,
         return true;
     }
 
-    // Non-rescue blocks always count.
-    if (!IsRescueMinDifficultyBlock(pindex, params)) {
-        return true;
+    // Legacy pre-fork rescue block quarantine.
+    if (IsLegacyRescueMinDifficultyBlock(pindex, params)) {
+        return pindex->nHeight <= (next_height - nPastBlocks);
     }
 
-    // After quarantine activates, rescue blocks are ignored for one full DGW
-    // window before they become eligible samples.
-    //
-    // Computing work for height H:
-    //   rescue block at H-1 .. H-23  => ignored
-    //   rescue block at <= H-24      => eligible
-    return pindex->nHeight <= (next_height - nPastBlocks);
+    // Post-fork consensus lottery block quarantine.
+    if (IsConsensusLotteryBlock(pindex, params)) {
+        return pindex->nHeight <= (next_height - nPastBlocks);
+    }
+
+    return true;
 }
 
 // -----------------------------------------------------------------------------
@@ -114,7 +320,6 @@ static unsigned int DarkGravityWave(const CBlockIndex* pindexLast,
         return pindexLast->nBits;
     }
 
-    // Until we have enough history, stay at floor.
     if (pindexLast->nHeight < nPastBlocks) {
         return bnPowLimit.GetCompact();
     }
@@ -146,15 +351,14 @@ static unsigned int DarkGravityWave(const CBlockIndex* pindexLast,
         if (nBlockCount == 1) {
             bnPastTargetAvg = bnTarget;
         } else {
-            // Correct running average:
-            // new_avg = ((old_avg * (count - 1)) + sample) / count
             bnPastTargetAvg = ((bnPastTargetAvg * (nBlockCount - 1)) + bnTarget) / nBlockCount;
         }
 
-        if (nLastEligibleBlockTime > 0) {
-            int64_t nDiff = nLastEligibleBlockTime - pindex->GetBlockTime();
+        const int64_t nThisBlockTime = BlockTimeForDGW(pindex, params, next_height);
 
-            // Guard against bad timestamps.
+        if (nLastEligibleBlockTime > 0) {
+            int64_t nDiff = nLastEligibleBlockTime - nThisBlockTime;
+
             if (nDiff < 0) {
                 nDiff = 0;
             }
@@ -162,19 +366,16 @@ static unsigned int DarkGravityWave(const CBlockIndex* pindexLast,
             nActualTimespan += nDiff;
         }
 
-        nLastEligibleBlockTime = pindex->GetBlockTime();
+        nLastEligibleBlockTime = nThisBlockTime;
         pindex = pindex->pprev;
     }
 
-    // If we cannot gather a full eligible sample set, fall back to minimum
-    // difficulty rather than deriving work from a partial window.
     if (nBlockCount < nPastBlocks) {
         return bnPowLimit.GetCompact();
     }
 
     const int64_t nTargetTimespan = nPastBlocks * params.nPowTargetSpacing;
 
-    // Clamp the adjustment window.
     if (nActualTimespan < nTargetTimespan / 3) {
         nActualTimespan = nTargetTimespan / 3;
     }
@@ -223,7 +424,6 @@ unsigned int GetNextWorkRequired(const CBlockIndex* pindexLast,
 {
     const arith_uint256 bnPowLimit = UintToArith256(params.powLimit);
 
-    // Genesis block
     if (pindexLast == nullptr) {
         return bnPowLimit.GetCompact();
     }
@@ -234,7 +434,16 @@ unsigned int GetNextWorkRequired(const CBlockIndex* pindexLast,
 
     const int64_t next_height = pindexLast->nHeight + 1;
 
-    // 2x-spacing rescue min-difficulty rule.
+    // Post-36000 lottery era and post-36300 final lottery era both derive
+    // lottery eligibility from prior confirmed chain state only.
+    if (LotteryConsensusActive(params, next_height)) {
+        if (IsConsensusLotteryHeight(pindexLast, params, next_height)) {
+            return bnPowLimit.GetCompact();
+        }
+        return DarkGravityWave(pindexLast, params, next_height);
+    }
+
+    // Legacy pre-36000 rescue rule.
     if (MinDiffRescueActive(params, next_height)) {
         if (pblock->GetBlockTime() >
             pindexLast->GetBlockTime() + (params.nPowTargetSpacing * 2)) {
@@ -293,13 +502,23 @@ bool PermittedDifficultyTransition(const Consensus::Params& params,
 
     const uint32_t pow_limit_bits = PowLimitBits(params);
 
-    // If rescue rules are active, explicitly allow a jump to powLimit.
-    // This covers legal rescue blocks without disabling all sanity checking
-    // for the entire post-rescue era.
-    if (MinDiffRescueActive(params, height) && new_nbits == pow_limit_bits) {
+    // Legacy pre-36000 rescue allowance.
+    if (!LotteryConsensusActive(params, height) &&
+        MinDiffRescueActive(params, height) &&
+        new_nbits == pow_limit_bits) {
         return true;
     }
 
+    // Era 1 (36000..36299): preserve existing lottery-era permissive allowance
+    // so the already-deployed intermediate fork remains compatible.
+    if (LotteryConsensusActive(params, height) &&
+        !LotteryFinalConsensusActive(params, height) &&
+        new_nbits == pow_limit_bits) {
+        return true;
+    }
+
+    // Era 2 (>= 36300): no broad powLimit allowance here. Exact legality of a
+    // powLimit block must come from the real next-work calculation.
     bool fNeg = false;
     bool fOverflow = false;
     arith_uint256 old_target, new_target;
@@ -317,7 +536,6 @@ bool PermittedDifficultyTransition(const Consensus::Params& params,
         return false;
     }
 
-    // Broad per-block sanity rails for non-rescue transitions.
     if (new_target > old_target * 4) {
         return false;
     }
