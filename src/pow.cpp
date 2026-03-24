@@ -274,6 +274,12 @@ static inline bool IsConsensusLotteryBlock(const CBlockIndex* pindex,
     return IsConsensusLotteryBlockV1(pindex, params);
 }
 
+static inline bool LotterySamplePermanentQuarantineActive(const Consensus::Params& params, int64_t height)
+{
+    return params.fPowAllowMinDifficultyBlocks &&
+           height >= params.nLotterySamplePermanentQuarantineHeight;
+}
+
 // -----------------------------------------------------------------------------
 // DGW sample eligibility
 // -----------------------------------------------------------------------------
@@ -298,6 +304,13 @@ static inline bool IsEligibleDGWBlock(const CBlockIndex* pindex,
 
     // Post-fork consensus lottery block quarantine.
     if (IsConsensusLotteryBlock(pindex, params)) {
+        // New HF: from this height forward, lottery blocks never re-enter
+        // the DGW sample window.
+        if (LotterySamplePermanentQuarantineActive(params, next_height)) {
+            return false;
+        }
+
+        // Old behavior preserved before the HF.
         return pindex->nHeight <= (next_height - nPastBlocks);
     }
 
