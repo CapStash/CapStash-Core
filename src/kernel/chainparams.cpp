@@ -106,11 +106,12 @@ public:
         consensus.MinBIP9WarningHeight = 10080; // segwit activation height + miner confirmation window
         consensus.powLimit = uint256S("00000001fffe0000000000000000000000000000000000000000000000000000");
         consensus.nPowTargetSpacing = 60;  // 60 Second Block Target
-        consensus.nPowTargetTimespan = 600; // Per Block Adjustment over a 10 block rolling window.
+        consensus.nPowTargetTimespan = 600; 
         consensus.nMinDiffRescueHeight = 100;
         consensus.nMinDiffQuarantineHeight = 150;
         consensus.nLotteryConsensusHeight = 55000;
         consensus.nLotteryFinalConsensusHeight = 55100;
+        consensus.nLotterySamplePermanentQuarantineHeight = 65000;
         consensus.nLotteryModulo = 20;
         consensus.fPowAllowMinDifficultyBlocks = true;
         consensus.fPowNoRetargeting = false;
