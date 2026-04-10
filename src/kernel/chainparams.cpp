@@ -94,9 +94,9 @@ public:
         consensus.signet_challenge.clear();
         consensus.nSubsidyHalvingInterval = std::numeric_limits<int>::max(); // One Cap Block Reward + TX Fees, Per Block, Forever. 
         consensus.script_flag_exceptions.emplace( // BIP16 exception
-            uint256S("0xb052d8565080f770917b4f5a8672121ede07b2fc8c66fb1bd27c04f1e5c2bae8"), SCRIPT_VERIFY_NONE);
+            uint256S("0x8ece4004870037c2c279203723123c62108290d0e77041474230b762f54ff594"), SCRIPT_VERIFY_NONE);
         consensus.script_flag_exceptions.emplace( // Taproot exception
-            uint256S("0xb052d8565080f770917b4f5a8672121ede07b2fc8c66fb1bd27c04f1e5c2bae8"), SCRIPT_VERIFY_P2SH | SCRIPT_VERIFY_WITNESS);
+            uint256S("0x8ece4004870037c2c279203723123c62108290d0e77041474230b762f54ff594"), SCRIPT_VERIFY_P2SH | SCRIPT_VERIFY_WITNESS);
         consensus.BIP34Height = 5;
         consensus.BIP34Hash = uint256S("");
         consensus.BIP65Height = 5; // 000000000000000004c2b624ed5d7756c508d90fd0da2c7c679febfa6c4735f0
@@ -106,14 +106,16 @@ public:
         consensus.MinBIP9WarningHeight = 10080; // segwit activation height + miner confirmation window
         consensus.powLimit = uint256S("00000001fffe0000000000000000000000000000000000000000000000000000");
         consensus.nPowTargetSpacing = 60;  // 60 Second Block Target
-        consensus.nPowTargetTimespan = 600; 
+        consensus.nPowTargetTimespan = 600; // Per Block Adjustment over a 10 block rolling window.
         consensus.nMinDiffRescueHeight = 100;
         consensus.nMinDiffQuarantineHeight = 150;
         consensus.nLotteryConsensusHeight = 55000;
         consensus.nLotteryFinalConsensusHeight = 55100;
-        consensus.nLotterySamplePermanentQuarantineHeight = 65000;
         consensus.nLotteryModulo = 20;
-        consensus.fPowAllowMinDifficultyBlocks = true;
+
+        consensus.fPowAllowMinDifficultyBlocks = false; // stock Bitcoin meaning
+        consensus.fEnableRescueMinDiff = true;          // CapStash custom rule
+        consensus.fEnableLotteryBlocks = true;          // CapStash custom rule
         consensus.fPowNoRetargeting = false;
         consensus.nRuleChangeActivationThreshold = 10080; // ~7 Days
         consensus.nMinerConfirmationWindow = 10080; // ~7 Days
@@ -128,8 +130,8 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].nTimeout = 1803859200; // March 1, 2027
         consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].min_activation_height = 3000; // Approximately November 12th, 2021
                                                 
-        consensus.nMinimumChainWork = uint256S("0x000000000000000000000000000000000000000000000000000000000000f000");
-        consensus.defaultAssumeValid = uint256S("0x964dc7f1b5336a2fb14b6f4be6dc9a1b21fab76ea435bcc174671d3726f9176b"); // 824000
+        consensus.nMinimumChainWork = uint256S("0x000000000000000000000000000000000000000000000000001b733f57fa3416");
+        consensus.defaultAssumeValid = uint256S("0x903009846db9a2908185a81b8153de0f03f76ea9a29f3371a7547c65c759b0a2"); // 56500
 
         /**
          * The message start string is designed to be unlikely to occur in normal data.
@@ -222,21 +224,31 @@ public:
         consensus.signet_challenge.clear();
         consensus.nSubsidyHalvingInterval = std::numeric_limits<int>::max();
         consensus.script_flag_exceptions.emplace( // BIP16 exception
-            uint256S("0x00000000dd30457c001f4095d208cc1296b0eed002427aa599874af7a432b105"), SCRIPT_VERIFY_NONE);
+            uint256S("0x"), SCRIPT_VERIFY_NONE);
+        
         consensus.BIP34Height = 5;
-        consensus.BIP34Hash = uint256S("0x0000000023b3a96d3484e5abb3755c413e7d41500f8e2a5c3f0dd01299cd8ef8");
-        consensus.BIP65Height = 5; // 00000000007f6655f22f98e72ed80d8b06dc761d5da09df0fa1dc4be4f861eb6
-        consensus.BIP66Height = 5; // 000000002104c8c45e99a8853285a3b592602a3ccde2b832481da85e9e4ba182
-        consensus.CSVHeight = 5; // 00000000025e930139bac5c6c31a403776da130831ab85be56578f3fa75369bb
-        consensus.SegwitHeight = 5; // 00000000002b980fcd729daaa248fd9316a5200e9b367f4ff2c42453e84201ca
-        consensus.MinBIP9WarningHeight = 5; // segwit activation height + miner confirmation window
+        consensus.BIP34Hash = uint256S("161324cf61c6f493ba352139f4496328e8accb66577ca4be8a5d862dafa277ef");
+        consensus.BIP65Height = 5; // 
+        consensus.BIP66Height = 5; // 
+        consensus.CSVHeight = 5; // 
+        consensus.SegwitHeight = 5; // 
+        consensus.MinBIP9WarningHeight = 100; // segwit activation height + miner confirmation window
         consensus.powLimit = uint256S("00000001fffe0000000000000000000000000000000000000000000000000000");
         consensus.nPowTargetSpacing = 60;  // 60 Second Block Target
         consensus.nPowTargetTimespan = 600; // Per Block Adjustment over a 10 block rolling window.
-        consensus.fPowAllowMinDifficultyBlocks = true;
+        consensus.nMinDiffRescueHeight = 100;
+        consensus.nMinDiffQuarantineHeight = 150;
+        consensus.nLotteryConsensusHeight = 500;
+        consensus.nLotteryFinalConsensusHeight = 550;
+        consensus.nLotteryModulo = 20;
+
+        consensus.fPowAllowMinDifficultyBlocks = false; // stock Bitcoin meaning
+        consensus.fEnableRescueMinDiff = true;          // CapStash custom rule
+        consensus.fEnableLotteryBlocks = true;          // CapStash custom rule
         consensus.fPowNoRetargeting = false;
-        consensus.nRuleChangeActivationThreshold = 60; // One Hour
-        consensus.nMinerConfirmationWindow = 60; // One Hour
+        consensus.nRuleChangeActivationThreshold = 10080; // ~7 Days
+        consensus.nMinerConfirmationWindow = 10080; // ~7 Days        
+        
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].bit = 28;
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nStartTime = Consensus::BIP9Deployment::NEVER_ACTIVE;
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
@@ -366,6 +378,11 @@ public:
         consensus.nPowTargetTimespan = 14 * 24 * 60 * 60; // two weeks
         consensus.nPowTargetSpacing = 10 * 60;
         consensus.fPowAllowMinDifficultyBlocks = false;
+        consensus.nMinDiffRescueHeight = 100;
+        consensus.nMinDiffQuarantineHeight = 100;
+        consensus.nLotteryConsensusHeight = 100;
+        consensus.nLotteryFinalConsensusHeight = 100;
+        consensus.nLotteryModulo = 20;
         consensus.fPowNoRetargeting = false;
         consensus.nRuleChangeActivationThreshold = 1815; // 90% of 2016
         consensus.nMinerConfirmationWindow = 2016; // nPowTargetTimespan / nPowTargetSpacing
@@ -445,6 +462,11 @@ public:
         consensus.nPowTargetTimespan = 14 * 24 * 60 * 60; // two weeks
         consensus.nPowTargetSpacing = 10 * 60;
         consensus.fPowAllowMinDifficultyBlocks = true;
+        consensus.nMinDiffRescueHeight = 100;
+        consensus.nMinDiffQuarantineHeight = 100;
+        consensus.nLotteryConsensusHeight = 100;
+        consensus.nLotteryFinalConsensusHeight = 100;
+        consensus.nLotteryModulo = 20;
         consensus.fPowNoRetargeting = true;
         consensus.nRuleChangeActivationThreshold = 108; // 75% for testchains
         consensus.nMinerConfirmationWindow = 144; // Faster than normal for regtest (144 instead of 2016)
