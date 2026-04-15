@@ -436,6 +436,10 @@ void ExplorerPage::setClientModel(ClientModel* model)
 {
     m_client_model = model;
 
+    if (!m_client_model && m_updateTimer) {
+        m_updateTimer->stop();
+    }
+
     refreshNetworkStats();
     refreshMempool();
     loadInitialBlocks();

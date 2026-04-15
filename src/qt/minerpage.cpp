@@ -528,10 +528,13 @@ void MinerPage::setClientModel(ClientModel* model)
 {
     m_client_model = model;
 
+    if (!m_client_model && m_updateTimer) {
+        m_updateTimer->stop();
+    }
+
     if (m_hashrateGraph) {
         m_hashrateGraph->clear();
     }
-
     updateMiningStats();
 }
 
