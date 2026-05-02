@@ -108,15 +108,20 @@ struct Params {
     BIP9Deployment vDeployments[MAX_VERSION_BITS_DEPLOYMENTS];
     /** Proof of work parameters */
     uint256 powLimit;
-    bool fPowAllowMinDifficultyBlocks;
-    bool fPowNoRetargeting;
-    int64_t nPowTargetSpacing;
-    int64_t nPowTargetTimespan;
-    int64_t nMinDiffRescueHeight;
-    int64_t nMinDiffQuarantineHeight;
+    bool fPowAllowMinDifficultyBlocks{false};
+    bool fPowNoRetargeting{false};
+
+    // CapStash custom consensus toggles.
+    // Keep these separate from Bitcoin's stock testnet min-difficulty flag.
+    bool fEnableRescueMinDiff{false};
+    bool fEnableLotteryBlocks{false};
+
+    int64_t nPowTargetSpacing{0};
+    int64_t nPowTargetTimespan{0};
+    int64_t nMinDiffRescueHeight{0};
+    int64_t nMinDiffQuarantineHeight{0};
     int nLotteryConsensusHeight{0};
     int nLotteryFinalConsensusHeight{0};
-    int nLotterySamplePermanentQuarantineHeight;
     int nLotteryModulo{20};
     std::chrono::seconds PowTargetSpacing() const
     {
