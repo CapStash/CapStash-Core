@@ -1,8 +1,8 @@
 <div align="center">
 
-[![Total Downloads](https://img.shields.io/github/downloads/CapStash/CapStash-Core/total?label=Total%20Downloads&cacheSeconds=300)](https://github.com/CapStash/CapStash-Core/releases)
-[![v27.0.0 Downloads](https://img.shields.io/github/downloads/CapStash/CapStash-Core/v27.1.0/total?label=v27.1.0%20Downloads&cacheSeconds=300)](https://github.com/CapStash/CapStash-Core/releases/tag/v27.1.0)
-[![Latest Release](https://img.shields.io/github/v/release/CapStash/CapStash-Core?label=Latest%20Release&cacheSeconds=300)](https://github.com/CapStash/CapStash-Core/releases)
+[![Total Downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FCapStash%2FCapStash-Core%2Fbadges%2Ftotal-downloads.json%3Fv%3D1&cacheSeconds=300)](https://github.com/CapStash/CapStash-Core/releases)
+[![v27.1.0 Downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FCapStash%2FCapStash-Core%2Fbadges%2Fv27.1.0-downloads.json%3Fv%3D1&cacheSeconds=300)](https://github.com/CapStash/CapStash-Core/releases/tag/v27.1.0)
+[![Latest Release](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FCapStash%2FCapStash-Core%2Fbadges%2Flatest-release.json%3Fv%3D1&cacheSeconds=300)](https://github.com/CapStash/CapStash-Core/releases)
 
 </div>
 
