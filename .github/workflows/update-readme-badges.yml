@@ -1,0 +1,186 @@
+name: Update README badges
+
+on:
+  workflow_dispatch:
+
+  release:
+    types:
+      - published
+      - edited
+      - deleted
+      - prereleased
+      - released
+
+  schedule:
+    - cron: "23 */6 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-readme-badges
+  cancel-in-progress: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    env:
+      TARGET_TAG: v27.1.0
+
+    steps:
+      - name: Collect release statistics
+        id: metrics
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          total_downloads="$(
+            gh api --paginate \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              --jq '.[] | select(.draft == false) | .assets[]?.download_count' |
+            awk '
+              {
+                total += $1
+              }
+              END {
+                print total + 0
+              }
+            '
+          )"
+
+          if target_downloads="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "repos/${GITHUB_REPOSITORY}/releases/tags/${TARGET_TAG}" \
+              --jq '[.assets[]?.download_count] | add // 0' \
+              2>/dev/null
+          )"; then
+            :
+          else
+            target_downloads="0"
+          fi
+
+          if latest_release="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "repos/${GITHUB_REPOSITORY}/releases/latest" \
+              --jq '.tag_name' \
+              2>/dev/null
+          )"; then
+            :
+          else
+            latest_release="none"
+          fi
+
+          {
+            echo "total_downloads=${total_downloads}"
+            echo "target_downloads=${target_downloads}"
+            echo "latest_release=${latest_release}"
+          } >> "${GITHUB_OUTPUT}"
+
+          echo "Total downloads:        ${total_downloads}"
+          echo "${TARGET_TAG} downloads: ${target_downloads}"
+          echo "Latest release:         ${latest_release}"
+
+      - name: Generate Shields endpoint files
+        env:
+          TOTAL_DOWNLOADS: ${{ steps.metrics.outputs.total_downloads }}
+          TARGET_DOWNLOADS: ${{ steps.metrics.outputs.target_downloads }}
+          LATEST_RELEASE: ${{ steps.metrics.outputs.latest_release }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf badge-output
+          mkdir -p badge-output
+
+          python3 <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          output_directory = Path("badge-output")
+
+          total_downloads = int(
+              os.environ["TOTAL_DOWNLOADS"]
+          )
+
+          target_downloads = int(
+              os.environ["TARGET_DOWNLOADS"]
+          )
+
+          latest_release = os.environ["LATEST_RELEASE"]
+
+          badges = {
+              "total-downloads.json": {
+                  "schemaVersion": 1,
+                  "label": "Total Downloads",
+                  "message": f"{total_downloads:,}",
+                  "color": "blue",
+              },
+              "v27.1.0-downloads.json": {
+                  "schemaVersion": 1,
+                  "label": "v27.1.0 Downloads",
+                  "message": f"{target_downloads:,}",
+                  "color": "brightgreen",
+              },
+              "latest-release.json": {
+                  "schemaVersion": 1,
+                  "label": "Latest Release",
+                  "message": latest_release,
+                  "color": "blue",
+              },
+          }
+
+          for filename, payload in badges.items():
+              path = output_directory / filename
+
+              path.write_text(
+                  json.dumps(
+                      payload,
+                      separators=(",", ":"),
+                  ) + "\n",
+                  encoding="utf-8",
+              )
+          PY
+
+      - name: Publish badge files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd badge-output
+
+          git init -b badges
+
+          git config \
+            user.name \
+            "github-actions[bot]"
+
+          git config \
+            user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add .
+
+          git commit \
+            -m "Update CapStash README badges"
+
+          gh auth setup-git
+
+          git remote add origin \
+            "https://github.com/${GITHUB_REPOSITORY}.git"
+
+          git push \
+            --force \
+            origin \
+            badges
