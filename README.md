@@ -126,6 +126,72 @@ In software, that is CapStash.
 - built-in explorer
 - custom retro-futurist theme system
 
+---
+
+## Connecting to the Network
+
+If your node is having trouble finding peers, or you simply want to bootstrap faster, you can manually connect to known active nodes on the CapStash network.
+
+### Option 1: Add to `capstash.conf`
+
+Add the following lines to your `capstash.conf` file (located in your CapStash data directory):
+
+```
+addnode=73.26.110.235:9999
+addnode=129.121.76.126:9999
+addnode=178.156.177.32:8433
+addnode=50.6.6.41:9999
+addnode=149.50.101.95:20033
+addnode=218.148.222.67:9999
+addnode=38.134.40.199:9998
+addnode=108.165.12.195:9998
+addnode=204.168.162.29:9999
+addnode=109.123.241.63:9998
+addnode=167.94.7.86:9999
+addnode=174.22.111.105:9999
+addnode=166.88.160.95:9998
+addnode=172.81.100.173:9999
+addnode=37.107.6.31:9999
+addnode=202.130.201.30:9999
+addnode=114.198.50.171:9999
+```
+
+Then restart CapStash Core.
+
+### Option 2: Add Live via Console
+
+Open the CapStash Core debug console (`Window → Console`) and paste each line:
+
+```
+addnode 73.26.110.235:9999 add
+addnode 129.121.76.126:9999 add
+addnode 178.156.177.32:8433 add
+addnode 50.6.6.41:9999 add
+addnode 149.50.101.95:20033 add
+addnode 218.148.222.67:9999 add
+addnode 38.134.40.199:9998 add
+addnode 108.165.12.195:9998 add
+addnode 204.168.162.29:9999 add
+addnode 109.123.241.63:9998 add
+addnode 167.94.7.86:9999 add
+addnode 174.22.111.105:9999 add
+addnode 166.88.160.95:9998 add
+addnode 172.81.100.173:9999 add
+addnode 37.107.6.31:9999 add
+addnode 202.130.201.30:9999 add
+addnode 114.198.50.171:9999 add
+```
+
+Or via `capstash-cli`:
+
+```bash
+capstash-cli addnode "73.26.110.235:9999" add
+```
+
+> **Note:** Nodes added via the console are session-only and will be forgotten on restart. For permanent connections, use the `capstash.conf` method.
+
+---
+
 ## Join Vault 1337
 
 Discord: https://discord.gg/8bgFUcFW2T
